@@ -129,7 +129,7 @@ cd client && npm run build && npm run lint
 
 ## Deployment
 
-[![CI](https://github.com/<OWNER>/<REPOSITORY>/actions/workflows/ci.yml/badge.svg)](https://github.com/<OWNER>/<REPOSITORY>/actions/workflows/ci.yml)
+[![CI](https://github.com/vune0210/minishop/actions/workflows/ci.yml/badge.svg)](https://github.com/vune0210/minishop/actions/workflows/ci.yml)
 
 Production architecture: the Vite frontend is deployed to Vercel; the NestJS API and MySQL database are deployed as separate Railway services. Vercel calls the Railway API through `VITE_API_BASE_URL`; the API permits only that Vercel origin through `FRONTEND_URL`.
 
