@@ -12,6 +12,9 @@ async function seed(): Promise<void> {
   const existing = await users.findOneBy({ email: ADMIN_EMAIL });
 
   if (existing) {
+    // Re-promotes the role only. Deactivation is sticky on purpose: the seed
+    // runs on every container start and must never resurrect an account an
+    // admin deliberately switched off.
     if (existing.role !== UserRole.ADMIN) {
       existing.role = UserRole.ADMIN;
       await users.save(existing);
@@ -24,6 +27,7 @@ async function seed(): Promise<void> {
         name: 'Test Admin',
         password: await bcrypt.hash(ADMIN_PASSWORD, 12),
         role: UserRole.ADMIN,
+        isActive: true,
       }),
     );
     console.log(`Admin account created: ${ADMIN_EMAIL}`);

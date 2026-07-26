@@ -25,6 +25,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const user = await this.usersRepository.findOneBy({ id: payload.sub });
     if (!user) throw new UnauthorizedException();
+    // The row is re-read on every request anyway, so deactivation takes
+    // effect on the very next call — no token revocation machinery needed.
+    if (!user.isActive)
+      throw new UnauthorizedException('Account is deactivated');
 
     return {
       id: user.id,

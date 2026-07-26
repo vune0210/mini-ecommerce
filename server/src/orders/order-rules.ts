@@ -74,6 +74,49 @@ export function formatShippingAddress(parts: {
     .filter((part): part is string => Boolean(part))
     .join(', ');
 }
+/** Normalizes an optional audit note: trimmed, with blank/absent/null collapsing to null. */
+export function historyNote(note?: string | null): string | null {
+  const trimmed = note?.trim();
+  return trimmed ? trimmed : null;
+}
+export type StatusEventSource = {
+  fromStatus: OrderStatus | null;
+  toStatus: OrderStatus;
+  actorUserId: string | null;
+  actorRole: string | null;
+  note: string | null;
+  createdAt: Date;
+  actorUser?: { name: string } | null;
+};
+export type VisibleStatusEvent = {
+  fromStatus: OrderStatus | null;
+  toStatus: OrderStatus;
+  actorRole: string | null;
+  actorId: string | null;
+  actorName: string | null;
+  note: string | null;
+  createdAt: Date;
+};
+/**
+ * Projects a history row into the API event shape. Owners see the actor only
+ * as role + display name; the actor's user id is admin-only. A null fromStatus
+ * marks the order-creation event, and a deleted actor account leaves id/name
+ * null while the actorRole snapshot taken at write time survives.
+ */
+export function visibleStatusEvent(
+  event: StatusEventSource,
+  viewerIsAdmin: boolean,
+): VisibleStatusEvent {
+  return {
+    fromStatus: event.fromStatus,
+    toStatus: event.toStatus,
+    actorRole: event.actorRole,
+    actorId: viewerIsAdmin ? event.actorUserId : null,
+    actorName: event.actorUser?.name ?? null,
+    note: event.note,
+    createdAt: event.createdAt,
+  };
+}
 const transitions: Record<OrderStatus, OrderStatus[]> = {
   PENDING: [OrderStatus.PAID, OrderStatus.CANCELLED],
   PAID: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],

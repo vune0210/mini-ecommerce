@@ -12,6 +12,7 @@ import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { Product } from '../src/products/entities/product.entity';
 import { User, UserRole } from '../src/users/entities/user.entity';
+import { resetDatabase } from './utils/db';
 
 type Account = { token: string; userId: string };
 
@@ -41,17 +42,7 @@ describe('API e2e (MySQL test database)', () => {
     await app.close();
   });
   beforeEach(async () => {
-    for (const table of [
-      'cart_items',
-      'order_items',
-      'reviews',
-      'orders',
-      'carts',
-      'products',
-      'categories',
-      'users',
-    ])
-      await dataSource.query(`DELETE FROM \`${table}\``);
+    await resetDatabase(dataSource);
   });
 
   const shipping = {
@@ -517,14 +508,27 @@ describe('API e2e (MySQL test database)', () => {
         .get('/api/admin/stats?lowStockThreshold=5')
         .set(bearer(admin.token));
       expect(stats.status).toBe(200);
-      expect(stats.body.revenue).toEqual({
-        net: '25.00',
-        completed: '25.00',
-        cancelled: '0.00',
-      });
+      // Widened, not weakened: the original three figures survive verbatim;
+      // merchandise/discounts/shipping stay zero until the commerce bundle's
+      // money-breakdown migration adds their source columns.
+      expect(stats.body.revenue).toEqual(
+        expect.objectContaining({
+          net: '25.00',
+          completed: '25.00',
+          cancelled: '0.00',
+          merchandise: '0.00',
+          discounts: '0.00',
+          shipping: '0.00',
+        }),
+      );
+      expect(stats.body.range).toEqual(
+        expect.objectContaining({ appliesTo: 'series-only', timezone: 'UTC' }),
+      );
+      expect(Array.isArray(stats.body.series)).toBe(true);
       expect(stats.body.orders).toEqual(
         expect.objectContaining({
           total: 1,
+          countable: 1,
           averageOrderValue: '25.00',
           byStatus: expect.objectContaining({ COMPLETED: 1, PENDING: 0 }),
         }),

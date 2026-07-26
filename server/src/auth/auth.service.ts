@@ -52,6 +52,10 @@ export class AuthService {
     if (!user || !(await bcrypt.compare(dto.password, user.password))) {
       throw new UnauthorizedException('Invalid email or password');
     }
+    // Checked only after the password matched, so the specific message never
+    // reveals whether an email is registered to someone probing credentials.
+    if (!user.isActive)
+      throw new UnauthorizedException('Account is deactivated');
 
     return {
       user: this.toAuthenticatedUser(user),
@@ -71,6 +75,9 @@ export class AuthService {
 
       const user = await this.usersRepository.findOneBy({ id: payload.sub });
       if (!user) throw new UnauthorizedException();
+      // Deactivated accounts cannot mint fresh access tokens. The catch
+      // below deliberately collapses this into the generic refresh 401.
+      if (!user.isActive) throw new UnauthorizedException();
 
       return { accessToken: await this.signAccessToken(user) };
     } catch {

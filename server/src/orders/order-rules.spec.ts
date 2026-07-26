@@ -2,10 +2,12 @@ import { OrderStatus } from './entities/order.entity';
 import {
   buildOrderNumber,
   formatShippingAddress,
+  historyNote,
   sortForLocking,
   orderTotal,
   stockFailures,
   validOrderTransition,
+  visibleStatusEvent,
 } from './order-rules';
 describe('order rules', () => {
   it('orders row locks by product id so concurrent writers agree', () => {
@@ -82,6 +84,56 @@ describe('order rules', () => {
     ).toEqual([
       { productId: 'a', productName: 'A', requested: 3, available: 2 },
     ]);
+  });
+  it('normalizes history notes to trimmed text or null', () => {
+    expect(historyNote('  Payment confirmed  ')).toBe('Payment confirmed');
+    expect(historyNote('   ')).toBeNull();
+    expect(historyNote('')).toBeNull();
+    expect(historyNote(undefined)).toBeNull();
+    expect(historyNote(null)).toBeNull();
+  });
+  it('redacts the actor id from owner-facing status events', () => {
+    const event = {
+      fromStatus: OrderStatus.PENDING,
+      toStatus: OrderStatus.PAID,
+      actorUserId: 'admin-1',
+      actorRole: 'ADMIN',
+      note: 'Paid by bank transfer',
+      createdAt: new Date('2026-07-26T10:00:00.000Z'),
+      actorUser: { name: 'Ops Admin' },
+    };
+    // Owners still learn who acted (role + display name) — just never the id.
+    expect(visibleStatusEvent(event, false)).toEqual({
+      fromStatus: OrderStatus.PENDING,
+      toStatus: OrderStatus.PAID,
+      actorRole: 'ADMIN',
+      actorId: null,
+      actorName: 'Ops Admin',
+      note: 'Paid by bank transfer',
+      createdAt: new Date('2026-07-26T10:00:00.000Z'),
+    });
+    expect(visibleStatusEvent(event, true).actorId).toBe('admin-1');
+  });
+  it('keeps the role snapshot when the actor account was deleted', () => {
+    // actor_user_id is ON DELETE SET NULL; the varchar role snapshot survives.
+    const event = {
+      fromStatus: null,
+      toStatus: OrderStatus.PENDING,
+      actorUserId: null,
+      actorRole: 'CUSTOMER',
+      note: null,
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      actorUser: null,
+    };
+    expect(visibleStatusEvent(event, true)).toEqual({
+      fromStatus: null,
+      toStatus: OrderStatus.PENDING,
+      actorRole: 'CUSTOMER',
+      actorId: null,
+      actorName: null,
+      note: null,
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    });
   });
   it('allows only forward lifecycle transitions', () => {
     expect(validOrderTransition(OrderStatus.PENDING, OrderStatus.PAID)).toBe(

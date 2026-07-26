@@ -21,6 +21,9 @@ async function bootstrap(): Promise<void> {
       process.env.FRONTEND_URL ??
       process.env.CLIENT_ORIGIN ??
       'http://localhost:5173',
+    // The SPA reads the CSV export filename from this header; CORS strips it
+    // from cross-origin responses unless it is exposed.
+    exposedHeaders: ['Content-Disposition'],
   });
   app.setGlobalPrefix('api');
   app.useGlobalPipes(

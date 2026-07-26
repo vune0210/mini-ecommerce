@@ -9,12 +9,13 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../users/entities/user.entity';
+import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { ListAdminOrdersDto, ListOrdersDto } from './dto/list-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -30,7 +31,7 @@ export class OrdersController {
     @Request() request: { user: AuthenticatedUser },
     @Body() dto: CheckoutDto,
   ) {
-    return this.orders.checkout(request.user.id, dto);
+    return this.orders.checkout(request.user, dto);
   }
   @Get() list(
     @Request() request: { user: AuthenticatedUser },
@@ -46,8 +47,20 @@ export class OrdersController {
   @Patch(':id/status') @UseGuards(RolesGuard) @Roles(UserRole.ADMIN) status(
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
+    @Request() request: { user: AuthenticatedUser },
   ) {
-    return this.orders.updateStatus(id, dto);
+    return this.orders.updateStatus(id, dto, request.user);
+  }
+  @Get(':id/history')
+  @ApiOkResponse({
+    description:
+      'Status-history events for the order, oldest first. A null fromStatus marks the creation event. The actor is exposed as role + display name; actorId is non-null only for admin viewers.',
+  })
+  history(
+    @Param('id') id: string,
+    @Request() request: { user: AuthenticatedUser },
+  ) {
+    return this.orders.history(id, request.user);
   }
   @Get(':id') detail(
     @Param('id') id: string,
@@ -58,7 +71,8 @@ export class OrdersController {
   @Patch(':id/cancel') cancel(
     @Param('id') id: string,
     @Request() request: { user: AuthenticatedUser },
+    @Body() dto: CancelOrderDto,
   ) {
-    return this.orders.cancel(id, request.user.id);
+    return this.orders.cancel(id, request.user, dto);
   }
 }

@@ -21,17 +21,22 @@ import { CartItem } from '../cart/entities/cart-item.entity';
 import { Cart } from '../cart/entities/cart.entity';
 import { Product } from '../products/entities/product.entity';
 import { UserRole } from '../users/entities/user.entity';
+import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
 import { ListAdminOrdersDto, ListOrdersDto } from './dto/list-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { OrderItem } from './entities/order-item.entity';
+import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { Order, OrderStatus } from './entities/order.entity';
 import {
   buildOrderNumber,
+  historyNote,
   sortForLocking,
   orderTotal,
   stockFailures,
   validOrderTransition,
+  visibleStatusEvent,
+  VisibleStatusEvent,
 } from './order-rules';
 
 export type PaginatedOrders = {
@@ -50,12 +55,14 @@ export class OrdersService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
+    @InjectRepository(OrderStatusHistory)
+    private readonly statusHistory: Repository<OrderStatusHistory>,
   ) {}
 
-  async checkout(userId: string, dto: CheckoutDto): Promise<Order> {
+  async checkout(user: AuthenticatedUser, dto: CheckoutDto): Promise<Order> {
     return this.dataSource.transaction(async (manager) => {
       const cart = await manager.getRepository(Cart).findOne({
-        where: { user: { id: userId } },
+        where: { user: { id: user.id } },
         relations: { items: { product: true } },
       });
       if (!cart?.items.length) throw new BadRequestException('Cart is empty');
@@ -96,7 +103,7 @@ export class OrdersService {
         })),
       );
       const order = await this.insertOrder(manager, {
-        user: { id: userId },
+        user: { id: user.id },
         status: OrderStatus.PENDING,
         totalAmount,
         recipientName: dto.recipientName.trim(),
@@ -107,6 +114,14 @@ export class OrdersService {
         city: dto.city.trim(),
         note: dto.note?.trim() || null,
       });
+      // A null fromStatus marks the creation event in the audit trail.
+      await this.recordTransition(
+        manager,
+        order,
+        null,
+        OrderStatus.PENDING,
+        user,
+      );
       const orderItems = cart.items.map((item) => {
         const product = products.get(item.productId)!;
         return manager.getRepository(OrderItem).create({
@@ -195,19 +210,27 @@ export class OrdersService {
     return { items, total, page: query.page, limit: query.limit };
   }
 
-  async cancel(id: string, userId: string): Promise<Order> {
+  async cancel(
+    id: string,
+    user: AuthenticatedUser,
+    dto: CancelOrderDto,
+  ): Promise<Order> {
     return this.dataSource.transaction(async (manager) => {
       await this.lockOrder(manager, id);
       const order = await this.orderWithItems(manager, id, true);
-      if (order.user.id !== userId)
+      if (order.user.id !== user.id)
         throw new ForbiddenException('You do not have access to this order');
       if (order.status !== OrderStatus.PENDING)
         throw new BadRequestException('Only pending orders can be cancelled');
-      return this.cancelOrder(manager, order);
+      return this.cancelOrder(manager, order, user, dto.note);
     });
   }
 
-  async updateStatus(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
+  async updateStatus(
+    id: string,
+    dto: UpdateOrderStatusDto,
+    actor: AuthenticatedUser,
+  ): Promise<Order> {
     return this.dataSource.transaction(async (manager) => {
       await this.lockOrder(manager, id);
       const order = await this.orderWithItems(manager, id, true);
@@ -216,16 +239,51 @@ export class OrdersService {
           `Invalid status transition from ${order.status} to ${dto.status}`,
         );
       if (dto.status === OrderStatus.CANCELLED)
-        return this.cancelOrder(manager, order);
+        return this.cancelOrder(manager, order, actor, dto.note);
+      const fromStatus = order.status;
       order.status = dto.status;
       await manager.getRepository(Order).save(order);
+      await this.recordTransition(
+        manager,
+        order,
+        fromStatus,
+        dto.status,
+        actor,
+        dto.note,
+      );
       return this.orderWithItems(manager, order.id, true);
     });
+  }
+
+  /**
+   * Status-history timeline, oldest first. Owners get the actor redacted to
+   * role + display name via visibleStatusEvent; only admins see the actor id.
+   */
+  async history(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<VisibleStatusEvent[]> {
+    const order = await this.orders.findOne({
+      where: { id },
+      relations: { user: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (user.role !== UserRole.ADMIN && order.user.id !== user.id)
+      throw new ForbiddenException('You do not have access to this order');
+    const events = await this.statusHistory.find({
+      where: { orderId: id },
+      relations: { actorUser: true },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+    const viewerIsAdmin = user.role === UserRole.ADMIN;
+    return events.map((event) => visibleStatusEvent(event, viewerIsAdmin));
   }
 
   private async cancelOrder(
     manager: EntityManager,
     order: Order,
+    actor: AuthenticatedUser,
+    note?: string | null,
   ): Promise<Order> {
     // Same deterministic lock order as checkout — a cancel and a checkout
     // touching the same two products would otherwise deadlock each other.
@@ -255,9 +313,45 @@ export class OrdersService {
         await manager.getRepository(Product).save(product);
       }
     }
+    const fromStatus = order.status;
     order.status = OrderStatus.CANCELLED;
     await manager.getRepository(Order).save(order);
+    await this.recordTransition(
+      manager,
+      order,
+      fromStatus,
+      OrderStatus.CANCELLED,
+      actor,
+      note,
+    );
     return this.orderWithItems(manager, order.id, true);
+  }
+
+  /**
+   * Appends one audit row per transition, inside the caller's transaction so
+   * the history commits (or rolls back) atomically with the status change it
+   * records. The actor's role is snapshotted so the row stays meaningful if
+   * the account is later deleted (actor_user_id is ON DELETE SET NULL).
+   */
+  private async recordTransition(
+    manager: EntityManager,
+    order: Order,
+    fromStatus: OrderStatus | null,
+    toStatus: OrderStatus,
+    actor: AuthenticatedUser,
+    note?: string | null,
+  ): Promise<void> {
+    const repository = manager.getRepository(OrderStatusHistory);
+    await repository.save(
+      repository.create({
+        orderId: order.id,
+        fromStatus,
+        toStatus,
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        note: historyNote(note),
+      }),
+    );
   }
 
   /**

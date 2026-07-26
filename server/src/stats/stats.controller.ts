@@ -16,7 +16,10 @@ export class StatsController {
   constructor(private readonly stats: StatsService) {}
 
   @Get()
-  @ApiOkResponse({ description: 'Aggregated storefront metrics for admins.' })
+  @ApiOkResponse({
+    description:
+      'Aggregated storefront metrics for admins. Revenue and the daily series count only PAID/SHIPPED/COMPLETED orders; range.appliesTo is "series-only" when from/to are omitted (all-time aggregates, trailing-30-day series).',
+  })
   overview(@Query() query: StatsQueryDto): Promise<AdminStats> {
     return this.stats.overview(query);
   }
