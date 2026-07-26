@@ -1,6 +1,8 @@
 import { Receipt, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { AdminShell } from '../components/AdminShell';
+import { ExportButton } from '../components/admin/ExportButton';
 import { Alert, PageHeader, Panel, Pagination, Skeleton, StatusBadge } from '../components/ui';
 import { ADMIN_ORDER_PAGE_SIZE, adminError, useAdminOrders, useUpdateOrderStatus } from '../lib/admin-api';
 import { formatDate, formatPrice, ORDER_STATUS_LABEL, ORDER_STATUSES } from '../lib/format';
@@ -35,7 +37,11 @@ export function AdminOrdersPage() {
 
   return (
     <AdminShell>
-      <PageHeader title="Đơn hàng" description="Tra cứu và cập nhật trạng thái đơn của khách." />
+      <PageHeader
+        title="Đơn hàng"
+        description="Tra cứu và cập nhật trạng thái đơn của khách."
+        action={<ExportButton kind="orders" params={{ status }} label="Xuất CSV" />}
+      />
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2">
         <div className="relative">
@@ -97,8 +103,13 @@ export function AdminOrdersPage() {
                 <tbody className="divide-y divide-slate-50">
                   {orders.data?.items.map((order) => (
                     <tr className="transition-colors hover:bg-slate-50/60" key={order.id}>
-                      <td className="whitespace-nowrap px-5 py-3 font-semibold text-slate-900">
-                        {order.orderNumber}
+                      <td className="whitespace-nowrap px-5 py-3">
+                        <Link
+                          className="font-semibold text-slate-900 hover:text-brand-700 hover:underline"
+                          to={`/admin/orders/${order.id}`}
+                        >
+                          {order.orderNumber}
+                        </Link>
                       </td>
                       <td className="whitespace-nowrap px-5 py-3">
                         <p className="font-medium text-slate-900">{order.user.name}</p>

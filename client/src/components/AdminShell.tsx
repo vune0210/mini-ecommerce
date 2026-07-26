@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, Receipt, Tags } from 'lucide-react';
+import { LayoutDashboard, Package, Receipt, Tags, Users } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { AppNav } from './AppNav';
@@ -8,6 +8,7 @@ const items = [
   { to: '/admin/products', label: 'Sản phẩm', icon: Package, end: false },
   { to: '/admin/categories', label: 'Danh mục', icon: Tags, end: false },
   { to: '/admin/orders', label: 'Đơn hàng', icon: Receipt, end: false },
+  { to: '/admin/users', label: 'Người dùng', icon: Users, end: false },
 ];
 
 const itemClass = ({ isActive }: { isActive: boolean }): string =>

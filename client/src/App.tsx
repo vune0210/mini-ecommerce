@@ -3,8 +3,10 @@ import { AdminRoute } from './components/AdminRoute';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminCategoriesPage } from './pages/AdminCategoriesPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
+import { AdminOrderDetailPage } from './pages/AdminOrderDetailPage';
 import { AdminOrdersPage } from './pages/AdminOrdersPage';
 import { AdminProductsPage } from './pages/AdminProductsPage';
+import { AdminUsersPage } from './pages/AdminUsersPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { CartPage } from './pages/CartPage';
 import { CheckoutPage } from './pages/CheckoutPage';
@@ -37,6 +39,8 @@ export default function App() {
         <Route path="/admin/products" element={<AdminProductsPage />} />
         <Route path="/admin/categories" element={<AdminCategoriesPage />} />
         <Route path="/admin/orders" element={<AdminOrdersPage />} />
+        <Route path="/admin/orders/:id" element={<AdminOrderDetailPage />} />
+        <Route path="/admin/users" element={<AdminUsersPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/products" replace />} />
     </Routes>

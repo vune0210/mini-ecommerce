@@ -1,9 +1,11 @@
-import { ArrowLeft, Ban, Check, MapPin, Package, PackageX, Phone, Truck, Wallet } from 'lucide-react';
+import { ArrowLeft, Ban, Check, History, MapPin, Package, PackageX, Phone, Truck, Wallet } from 'lucide-react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
+import { OrderStatusTimeline } from '../components/OrderStatusTimeline';
 import { Alert, EmptyState, Panel, Skeleton, StatusBadge } from '../components/ui';
 import { formatDateTime, formatPrice, shippingAddress } from '../lib/format';
-import { orderErrorMessage, useCancelOrder, useOrder } from '../lib/order-api';
+import { orderErrorMessage, useCancelOrder, useOrder, useOrderHistory } from '../lib/order-api';
 import type { OrderStatus } from '../types/order';
 
 const steps: Array<{ status: OrderStatus; label: string; icon: typeof Check }> = [
@@ -55,7 +57,10 @@ function OrderProgress({ status }: { status: OrderStatus }) {
 export function OrderDetailPage() {
   const { id = '' } = useParams();
   const orderQuery = useOrder(id);
+  const historyQuery = useOrderHistory(id);
   const cancel = useCancelOrder();
+  const [cancelNote, setCancelNote] = useState('');
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const order = orderQuery.data;
 
   return (
@@ -163,22 +168,66 @@ export function OrderDetailPage() {
             </ul>
           </Panel>
 
+          <Panel className="mt-6" title="Lịch sử đơn hàng" icon={History}>
+            {historyQuery.isError ? (
+              <Alert>Không thể tải lịch sử đơn hàng.</Alert>
+            ) : (
+              <OrderStatusTimeline
+                events={historyQuery.data ?? []}
+                isPending={historyQuery.isPending}
+              />
+            )}
+          </Panel>
+
           {cancel.isError && (
             <div className="mt-4">
               <Alert>{orderErrorMessage(cancel.error)}</Alert>
             </div>
           )}
 
-          {order.status === 'PENDING' && (
-            <button
-              className="btn-danger mt-6"
-              disabled={cancel.isPending}
-              onClick={() => cancel.mutate(order.id)}
-            >
-              <Ban className="h-4 w-4" aria-hidden />
-              Huỷ đơn hàng
-            </button>
-          )}
+          {order.status === 'PENDING' &&
+            (confirmingCancel ? (
+              <div className="card mt-6 p-5">
+                <h3 className="font-semibold text-slate-900">Huỷ đơn hàng này?</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Toàn bộ sản phẩm sẽ được hoàn lại kho. Thao tác không thể hoàn tác.
+                </p>
+                <label className="label mt-4" htmlFor="cancel-note">
+                  Lý do huỷ <span className="font-normal text-slate-400">(không bắt buộc)</span>
+                </label>
+                <textarea
+                  className="field"
+                  id="cancel-note"
+                  rows={2}
+                  maxLength={500}
+                  placeholder="Ví dụ: đặt nhầm số lượng"
+                  value={cancelNote}
+                  onChange={(event) => setCancelNote(event.target.value)}
+                />
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button
+                    className="btn-danger"
+                    disabled={cancel.isPending}
+                    onClick={() => cancel.mutate({ id: order.id, note: cancelNote })}
+                  >
+                    <Ban className="h-4 w-4" aria-hidden />
+                    {cancel.isPending ? 'Đang huỷ...' : 'Xác nhận huỷ'}
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    disabled={cancel.isPending}
+                    onClick={() => setConfirmingCancel(false)}
+                  >
+                    Giữ đơn hàng
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn-danger mt-6" onClick={() => setConfirmingCancel(true)}>
+                <Ban className="h-4 w-4" aria-hidden />
+                Huỷ đơn hàng
+              </button>
+            ))}
 
           {order.status === 'COMPLETED' && (
             <div className="mt-6">
