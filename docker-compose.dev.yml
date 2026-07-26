@@ -1,0 +1,22 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: mini-ecommerce-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: mini_ecommerce
+      MYSQL_USER: mini_ecommerce
+      MYSQL_PASSWORD: mini_ecommerce_password
+      MYSQL_ROOT_PASSWORD: root_password
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uroot', '-proot_password']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mysql_data:

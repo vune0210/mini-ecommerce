@@ -1,0 +1,331 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import {
+  DataSource,
+  DeepPartial,
+  EntityManager,
+  In,
+  QueryFailedError,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
+import { AuthenticatedUser } from '../auth/auth.types';
+import { CartItem } from '../cart/entities/cart-item.entity';
+import { Cart } from '../cart/entities/cart.entity';
+import { Product } from '../products/entities/product.entity';
+import { UserRole } from '../users/entities/user.entity';
+import { CheckoutDto } from './dto/checkout.dto';
+import { ListAdminOrdersDto, ListOrdersDto } from './dto/list-orders.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { OrderItem } from './entities/order-item.entity';
+import { Order, OrderStatus } from './entities/order.entity';
+import {
+  buildOrderNumber,
+  sortForLocking,
+  orderTotal,
+  stockFailures,
+  validOrderTransition,
+} from './order-rules';
+
+export type PaginatedOrders = {
+  items: Order[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+const ORDER_NUMBER_ATTEMPTS = 5;
+
+@Injectable()
+export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    @InjectRepository(Order) private readonly orders: Repository<Order>,
+  ) {}
+
+  async checkout(userId: string, dto: CheckoutDto): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      const cart = await manager.getRepository(Cart).findOne({
+        where: { user: { id: userId } },
+        relations: { items: { product: true } },
+      });
+      if (!cart?.items.length) throw new BadRequestException('Cart is empty');
+      const products = new Map<string, Product>();
+      const stockChecks: Array<{
+        productId: string;
+        productName: string;
+        quantity: number;
+        available: number;
+      }> = [];
+      // Row locks are taken in a globally deterministic order. Locking in cart
+      // order lets two carts holding the same two products in opposite order
+      // deadlock, and MySQL kills one with no retry wrapper above this.
+      for (const item of sortForLocking(cart.items)) {
+        const product = await manager.getRepository(Product).findOne({
+          where: { id: item.productId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!product || item.quantity > product.stock)
+          stockChecks.push({
+            productId: item.productId,
+            productName: item.product.name,
+            quantity: item.quantity,
+            available: product?.stock ?? 0,
+          });
+        else products.set(product.id, product);
+      }
+      const failed = stockFailures(stockChecks);
+      if (failed.length)
+        throw new ConflictException({
+          message: 'Insufficient stock for one or more items',
+          items: failed,
+        });
+      const totalAmount = orderTotal(
+        cart.items.map((item) => ({
+          price: products.get(item.productId)!.price,
+          quantity: item.quantity,
+        })),
+      );
+      const order = await this.insertOrder(manager, {
+        user: { id: userId },
+        status: OrderStatus.PENDING,
+        totalAmount,
+        recipientName: dto.recipientName.trim(),
+        phone: dto.phone.trim(),
+        addressLine: dto.addressLine.trim(),
+        ward: dto.ward?.trim() || null,
+        district: dto.district?.trim() || null,
+        city: dto.city.trim(),
+        note: dto.note?.trim() || null,
+      });
+      const orderItems = cart.items.map((item) => {
+        const product = products.get(item.productId)!;
+        return manager.getRepository(OrderItem).create({
+          order,
+          orderId: order.id,
+          product,
+          productId: product.id,
+          productName: product.name,
+          unitPrice: Number(product.price).toFixed(2),
+          quantity: item.quantity,
+          subtotal: (Number(product.price) * item.quantity).toFixed(2),
+        });
+      });
+      await manager.getRepository(OrderItem).save(orderItems);
+      for (const item of cart.items) {
+        const product = products.get(item.productId)!;
+        product.stock -= item.quantity;
+        await manager.getRepository(Product).save(product);
+      }
+      await manager.getRepository(CartItem).delete({ cartId: cart.id });
+      return this.orderWithItems(manager, order.id);
+    });
+  }
+
+  async findMine(
+    userId: string,
+    query: ListOrdersDto,
+  ): Promise<PaginatedOrders> {
+    return this.paginate(query, (builder) =>
+      builder.andWhere('order.user_id = :userId', { userId }),
+    );
+  }
+  async findOne(id: string, user: AuthenticatedUser): Promise<Order> {
+    const order = await this.orderWithItems(this.dataSource.manager, id, true);
+    if (user.role !== UserRole.ADMIN && order.user.id !== user.id)
+      throw new ForbiddenException('You do not have access to this order');
+    return order;
+  }
+  async findAll(query: ListAdminOrdersDto): Promise<PaginatedOrders> {
+    return this.paginate(
+      query,
+      (builder) => {
+        const search = query.search?.trim();
+        if (search)
+          builder.andWhere(
+            '(order.orderNumber LIKE :search OR user.name LIKE :search OR user.email LIKE :search)',
+            { search: `%${search}%` },
+          );
+        return builder;
+      },
+      true,
+    );
+  }
+
+  private async paginate(
+    query: ListOrdersDto,
+    refine: (
+      builder: SelectQueryBuilder<Order>,
+    ) => SelectQueryBuilder<Order> | void,
+    includeUser = false,
+  ): Promise<PaginatedOrders> {
+    const builder = this.orders.createQueryBuilder('order');
+    if (includeUser) builder.leftJoinAndSelect('order.user', 'user');
+    if (query.status)
+      builder.andWhere('order.status = :status', { status: query.status });
+    refine(builder);
+    const total = await builder.getCount();
+    // Ids first, then a second load for relations: a paged join on a one-to-many
+    // would otherwise truncate an order's items. The id tiebreak keeps pages stable.
+    const page = await builder
+      .orderBy('order.createdAt', 'DESC')
+      .addOrderBy('order.id', 'ASC')
+      .skip((query.page - 1) * query.limit)
+      .take(query.limit)
+      .getMany();
+    const items = page.length
+      ? await this.orders.find({
+          where: { id: In(page.map((order) => order.id)) },
+          relations: {
+            items: { product: true },
+            ...(includeUser ? { user: true } : {}),
+          },
+          order: { createdAt: 'DESC', id: 'ASC' },
+        })
+      : [];
+    return { items, total, page: query.page, limit: query.limit };
+  }
+
+  async cancel(id: string, userId: string): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockOrder(manager, id);
+      const order = await this.orderWithItems(manager, id, true);
+      if (order.user.id !== userId)
+        throw new ForbiddenException('You do not have access to this order');
+      if (order.status !== OrderStatus.PENDING)
+        throw new BadRequestException('Only pending orders can be cancelled');
+      return this.cancelOrder(manager, order);
+    });
+  }
+
+  async updateStatus(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.lockOrder(manager, id);
+      const order = await this.orderWithItems(manager, id, true);
+      if (!validOrderTransition(order.status, dto.status))
+        throw new BadRequestException(
+          `Invalid status transition from ${order.status} to ${dto.status}`,
+        );
+      if (dto.status === OrderStatus.CANCELLED)
+        return this.cancelOrder(manager, order);
+      order.status = dto.status;
+      await manager.getRepository(Order).save(order);
+      return this.orderWithItems(manager, order.id, true);
+    });
+  }
+
+  private async cancelOrder(
+    manager: EntityManager,
+    order: Order,
+  ): Promise<Order> {
+    // Same deterministic lock order as checkout — a cancel and a checkout
+    // touching the same two products would otherwise deadlock each other.
+    for (const item of sortForLocking(order.items)) {
+      if (!item.productId) {
+        // order_items -> products is ON DELETE SET NULL, so the product this
+        // line sold no longer exists and there is no row to credit. Recreating
+        // it makes a new id, so the stock is genuinely unrecoverable — say so
+        // rather than skipping in silence.
+        this.logger.warn({
+          message:
+            'Cancelled order line references a deleted product; stock not restored',
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          orderItemId: item.id,
+          productName: item.productName,
+          quantity: item.quantity,
+        });
+        continue;
+      }
+      const product = await manager.getRepository(Product).findOne({
+        where: { id: item.productId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (product) {
+        product.stock += item.quantity;
+        await manager.getRepository(Product).save(product);
+      }
+    }
+    order.status = OrderStatus.CANCELLED;
+    await manager.getRepository(Order).save(order);
+    return this.orderWithItems(manager, order.id, true);
+  }
+
+  /**
+   * Takes a row lock before a status transition is decided. Without it two
+   * concurrent cancels both read PENDING and each restocks the same items.
+   * Kept join-free so MySQL locks only the orders row.
+   */
+  private async lockOrder(manager: EntityManager, id: string): Promise<void> {
+    const locked = await manager
+      .getRepository(Order)
+      .createQueryBuilder('order')
+      .setLock('pessimistic_write')
+      .where('order.id = :id', { id })
+      .getOne();
+    if (!locked) throw new NotFoundException('Order not found');
+  }
+
+  /**
+   * Allocates the order number by inserting and retrying, not by probing first.
+   * A SELECT-then-INSERT let two concurrent checkouts pick the same candidate;
+   * the loser hit UQ_orders_order_number as a raw QueryFailedError, which meant
+   * a 500 and a rollback of the stock decrements that had already succeeded.
+   *
+   * A duplicate-key failure does not poison a MySQL transaction, so retrying
+   * inside the same transaction is safe. `orders` has exactly one unique index
+   * besides the primary key, so ER_DUP_ENTRY here can only be the order number.
+   */
+  private async insertOrder(
+    manager: EntityManager,
+    draft: DeepPartial<Order>,
+  ): Promise<Order> {
+    const repository = manager.getRepository(Order);
+    for (let attempt = 1; attempt <= ORDER_NUMBER_ATTEMPTS; attempt += 1) {
+      try {
+        return await repository.save(
+          repository.create({
+            ...draft,
+            orderNumber: buildOrderNumber(new Date()),
+          }),
+        );
+      } catch (error) {
+        const duplicate =
+          error instanceof QueryFailedError &&
+          (error as QueryFailedError & { code?: string }).code ===
+            'ER_DUP_ENTRY';
+        if (!duplicate) throw error;
+        if (attempt === ORDER_NUMBER_ATTEMPTS)
+          throw new ConflictException(
+            'Could not allocate a unique order number',
+          );
+      }
+    }
+    throw new ConflictException('Could not allocate a unique order number');
+  }
+
+  private async orderWithItems(
+    manager: EntityManager,
+    id: string,
+    includeUser = false,
+  ): Promise<Order> {
+    const order = await manager.getRepository(Order).findOne({
+      where: { id },
+      relations: {
+        items: { product: true },
+        ...(includeUser ? { user: true } : {}),
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    return order;
+  }
+}

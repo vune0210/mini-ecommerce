@@ -1,0 +1,22 @@
+# package manager artifacts
+**/node_modules/
+**/dist/
+**/coverage/
+**/*.tsbuildinfo
+
+# environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# local tooling artifacts
+.ua/
+**/.ua/
+.agents/
+target/

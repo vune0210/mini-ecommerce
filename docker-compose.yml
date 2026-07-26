@@ -1,0 +1,49 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: mini_ecommerce
+      MYSQL_USER: mini_ecommerce
+      MYSQL_PASSWORD: mini_ecommerce_password
+      MYSQL_ROOT_PASSWORD: root_password
+    ports:
+      - '3306:3306'
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uroot', '-proot_password']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./server
+    environment:
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: mini_ecommerce
+      DB_PASSWORD: mini_ecommerce_password
+      DB_NAME: mini_ecommerce
+      JWT_ACCESS_SECRET: local-docker-access-secret-change-me
+      JWT_REFRESH_SECRET: local-docker-refresh-secret-change-me
+      FRONTEND_URL: http://localhost:8081
+    ports:
+      - '3000:3000'
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./client
+      args:
+        VITE_API_BASE_URL: /api
+    ports:
+      - '8082:80'
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
