@@ -1,25 +1,39 @@
-import { useQuery } from '@tanstack/react-query';
-import { Pencil, Plus, Tags, Trash2, X } from 'lucide-react';
+import { Pencil, Plus, Tags, X } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { AdminShell } from '../components/AdminShell';
+import { CategoryTree, flattenCategories, subtreeIds } from '../components/admin/CategoryTree';
 import { Alert, Badge, PageHeader, Panel, Skeleton } from '../components/ui';
-import { adminError, useCreateCategory, useDeleteCategory, useUpdateCategory } from '../lib/admin-api';
-import { getCategories } from '../lib/catalog-api';
+import {
+  adminError,
+  adminErrorStatus,
+  useCategoryTree,
+  useCreateCategory,
+  useDeleteCategory,
+  useUpdateCategory,
+} from '../lib/admin-api';
 import { slugify } from '../lib/format';
-import type { Category } from '../types/catalog';
+import type { CategoryNode } from '../types/catalog';
 
 export function AdminCategoriesPage() {
-  const categories = useQuery({ queryKey: ['categories'], queryFn: getCategories });
+  const categories = useCategoryTree();
   const create = useCreateCategory();
   const update = useUpdateCategory();
   const remove = useDeleteCategory();
   const [name, setName] = useState('');
-  const [editing, setEditing] = useState<Category | null>(null);
+  const [parentId, setParentId] = useState('');
+  const [editing, setEditing] = useState<CategoryNode | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const rows = flattenCategories(categories.data ?? []);
+  // A category cannot become its own ancestor, so its whole branch is off the
+  // parent list. Disabling the options explains the rule before the server has
+  // to; the 400 handler below covers a tree that went stale in the meantime.
+  const forbidden = new Set(editing ? subtreeIds(editing) : []);
 
   function reset(): void {
     setEditing(null);
     setName('');
+    setParentId('');
     setError(null);
   }
 
@@ -30,40 +44,71 @@ export function AdminCategoriesPage() {
       return;
     }
     setError(null);
-    const input = { name: name.trim(), slug: slugify(name) };
+    const input = { name: name.trim(), slug: slugify(name), parentId: parentId || null };
     const callbacks = {
       onSuccess: () => {
         setName('');
+        setParentId('');
         setEditing(null);
       },
-      onError: (reason: unknown) => setError(adminError(reason)),
+      onError: (reason: unknown) => {
+        if (adminErrorStatus(reason) === 400)
+          setError(
+            'Không thể chuyển một danh mục vào chính nhánh con của nó — cả nhánh sẽ mất đường về gốc và không còn hiển thị ở đâu. Hãy chọn danh mục cha nằm ngoài nhánh này.',
+          );
+        else setError(adminError(reason));
+      },
     };
     if (editing) update.mutate({ ...input, id: editing.id }, callbacks);
     else create.mutate(input, callbacks);
   }
 
-  function beginEdit(category: Category): void {
+  function beginEdit(category: CategoryNode): void {
     setEditing(category);
     setName(category.name);
+    setParentId(category.parentId ?? '');
     setError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function deleteItem(category: Category): void {
-    if (
-      !window.confirm(
-        `Xóa danh mục “${category.name}”? Danh mục có sản phẩm có thể bị backend từ chối.`,
-      )
-    )
+  function deleteItem(category: CategoryNode): void {
+    // Both blockers are visible in the row, so refusing here explains the rule
+    // without spending a request that the server would answer with a 409.
+    const blockers: string[] = [];
+    if (category.children.length) blockers.push(`${category.children.length} danh mục con`);
+    if (category.productCount) blockers.push(`${category.productCount} sản phẩm`);
+    if (blockers.length) {
+      setError(
+        `Không thể xóa “${category.name}”: danh mục còn ${blockers.join(' và ')}. Hãy chuyển chúng sang danh mục khác (hoặc xóa) trước.`,
+      );
       return;
-    remove.mutate(category.id, { onError: (reason) => setError(adminError(reason)) });
+    }
+    if (!window.confirm(`Xóa danh mục “${category.name}”?`)) return;
+    setError(null);
+    remove.mutate(category.id, {
+      onError: (reason) => {
+        if (adminErrorStatus(reason) !== 409) {
+          setError(adminError(reason));
+          return;
+        }
+        const message = adminError(reason);
+        // productCount only counts published products, so a category that looks
+        // empty here can still hold unpublished ones. The server says which.
+        setError(
+          message.includes('subcategor')
+            ? `Không thể xóa “${category.name}”: danh mục vẫn còn danh mục con. Hãy chuyển hoặc xóa các danh mục con trước.`
+            : `Không thể xóa “${category.name}”: danh mục vẫn còn sản phẩm, kể cả sản phẩm chưa xuất bản (những sản phẩm này không được tính trong số hiển thị ở đây). Hãy chuyển chúng sang danh mục khác trước.`,
+        );
+      },
+    });
   }
 
   return (
     <AdminShell>
       <PageHeader
         title="Danh mục"
-        description="Nhóm sản phẩm theo danh mục để khách dễ tìm."
-        action={categories.data && <Badge tone="slate">{categories.data.length} danh mục</Badge>}
+        description="Nhóm sản phẩm theo danh mục, có thể lồng nhiều cấp. Số sản phẩm hiển thị là sản phẩm đã xuất bản nằm trực tiếp trong danh mục, không gồm danh mục con."
+        action={rows.length > 0 && <Badge tone="slate">{rows.length} danh mục</Badge>}
       />
 
       <Panel
@@ -79,83 +124,74 @@ export function AdminCategoriesPage() {
         }
       >
         <form className="space-y-4" onSubmit={submit}>
-          <div>
-            <label className="label" htmlFor="category-name">
-              Tên danh mục
-            </label>
-            <div className="flex flex-wrap gap-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="category-name">
+                Tên danh mục
+              </label>
               <input
-                className="field flex-1"
+                className="field"
                 id="category-name"
                 placeholder="Thời trang nam"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
               />
-              <button className="btn-primary" disabled={create.isPending || update.isPending}>
-                {editing ? 'Lưu thay đổi' : 'Tạo danh mục'}
-              </button>
+              {name.trim() && (
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Slug: <code className="font-mono text-slate-500">{slugify(name)}</code>
+                </p>
+              )}
             </div>
-            {name.trim() && (
+            <div>
+              <label className="label" htmlFor="category-parent">
+                Danh mục cha
+              </label>
+              <select
+                className="field"
+                id="category-parent"
+                value={parentId}
+                onChange={(event) => setParentId(event.target.value)}
+              >
+                <option value="">Không có (danh mục gốc)</option>
+                {rows.map(({ category, depth }) => (
+                  <option key={category.id} value={category.id} disabled={forbidden.has(category.id)}>
+                    {`${'    '.repeat(depth)}${depth ? '↳ ' : ''}${category.name}`}
+                  </option>
+                ))}
+              </select>
               <p className="mt-1.5 text-xs text-slate-400">
-                Slug: <code className="font-mono text-slate-500">{slugify(name)}</code>
+                {editing
+                  ? 'Chính danh mục này và các danh mục con của nó bị vô hiệu hoá: chuyển một danh mục vào nhánh con của chính nó sẽ tách cả nhánh khỏi gốc, nên máy chủ từ chối.'
+                  : 'Để trống nếu đây là danh mục cấp cao nhất.'}
               </p>
-            )}
+            </div>
           </div>
           {error && <Alert>{error}</Alert>}
+          <button className="btn-primary" disabled={create.isPending || update.isPending}>
+            {editing ? 'Lưu thay đổi' : 'Tạo danh mục'}
+          </button>
         </form>
       </Panel>
 
-      <Panel className="mt-6" title="Danh sách danh mục" icon={Tags} bare>
+      <Panel className="mt-6" title="Cây danh mục" icon={Tags} bare>
         {categories.isPending ? (
           <div className="p-5">
             <Skeleton className="h-48" />
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 text-xs uppercase tracking-wider text-slate-400">
-                  <th className="px-5 py-3 font-semibold">Tên</th>
-                  <th className="px-5 py-3 font-semibold">Slug</th>
-                  <th className="px-5 py-3 text-right font-semibold">Thao tác</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {categories.data?.map((category) => (
-                  <tr className="transition-colors hover:bg-slate-50/60" key={category.id}>
-                    <td className="px-5 py-3 font-medium text-slate-900">{category.name}</td>
-                    <td className="px-5 py-3">
-                      <code className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-500">
-                        {category.slug}
-                      </code>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-brand-50 hover:text-brand-600"
-                          onClick={() => beginEdit(category)}
-                          aria-label={`Sửa ${category.name}`}
-                        >
-                          <Pencil className="h-4 w-4" aria-hidden />
-                        </button>
-                        <button
-                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                          disabled={remove.isPending}
-                          onClick={() => deleteItem(category)}
-                          aria-label={`Xóa ${category.name}`}
-                        >
-                          <Trash2 className="h-4 w-4" aria-hidden />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!categories.data?.length && (
-              <p className="p-8 text-center text-sm text-slate-500">Chưa có danh mục nào.</p>
-            )}
+        ) : categories.isError ? (
+          <div className="p-5">
+            <Alert>Không thể tải danh sách danh mục.</Alert>
           </div>
+        ) : rows.length ? (
+          <CategoryTree
+            nodes={categories.data ?? []}
+            editingId={editing?.id ?? null}
+            busy={remove.isPending}
+            onEdit={beginEdit}
+            onDelete={deleteItem}
+          />
+        ) : (
+          <p className="p-8 text-center text-sm text-slate-500">Chưa có danh mục nào.</p>
         )}
       </Panel>
     </AdminShell>

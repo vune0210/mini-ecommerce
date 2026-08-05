@@ -15,7 +15,10 @@ export class Cart {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @OneToOne(() => User, { onDelete: 'CASCADE' })
+  // nullable: false matches the migration's NOT NULL column; without it
+  // TypeORM infers a nullable relation and migration:generate proposes
+  // widening the column on every run.
+  @OneToOne(() => User, { onDelete: 'CASCADE', nullable: false })
   @JoinColumn({ name: 'user_id' })
   user: User;
 

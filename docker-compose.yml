@@ -30,7 +30,7 @@ services:
       JWT_REFRESH_SECRET: local-docker-refresh-secret-change-me
       FRONTEND_URL: http://localhost:8081
     ports:
-      - '3000:3000'
+      - '3002:3000'
     depends_on:
       mysql:
         condition: service_healthy

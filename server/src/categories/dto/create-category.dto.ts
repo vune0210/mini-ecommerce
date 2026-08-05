@@ -1,5 +1,12 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateCategoryDto {
   @ApiProperty({ example: 'Electronics' })
@@ -13,4 +20,11 @@ export class CreateCategoryDto {
   @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   @MaxLength(120)
   slug: string;
+
+  @ApiPropertyOptional({
+    description: 'Nests this category under another. Omit for a top-level one.',
+  })
+  @IsOptional()
+  @IsUUID()
+  parentId?: string;
 }

@@ -62,6 +62,28 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsIn(['json', 'pretty'])
   LOG_FORMAT?: string;
+
+  /**
+   * Delivery pricing. Left unset, orders ship free and totals are identical to
+   * a deployment that predates shipping fees — so enabling the charge is an
+   * explicit business decision, never an upgrade side effect.
+   */
+  @IsOptional()
+  @IsNumberString({}, { message: 'SHIPPING_FLAT_FEE must be numeric' })
+  SHIPPING_FLAT_FEE?: string;
+
+  @IsOptional()
+  @IsNumberString({}, { message: 'FREE_SHIPPING_THRESHOLD must be numeric' })
+  FREE_SHIPPING_THRESHOLD?: string;
+
+  /**
+   * Turns off every @RateLimit rail. Exists for the e2e suite and load tests,
+   * which drive hundreds of logins from one address and would otherwise be
+   * measuring the limiter. Never set it in a deployment.
+   */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  RATE_LIMIT_DISABLED?: string;
 }
 
 /**

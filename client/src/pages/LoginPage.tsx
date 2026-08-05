@@ -91,6 +91,12 @@ export function LoginPage() {
         </div>
       </AuthField>
 
+      <div className="-mt-2 text-right">
+        <Link className="link text-sm" to="/forgot-password">
+          Quên mật khẩu?
+        </Link>
+      </div>
+
       <button className="btn-primary w-full" disabled={isSubmitting} type="submit">
         {isSubmitting ? 'Đang đăng nhập...' : 'Đăng nhập'}
       </button>

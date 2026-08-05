@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import {
   DataSource,
@@ -16,9 +17,16 @@ import {
   Repository,
   SelectQueryBuilder,
 } from 'typeorm';
+import { shippingSnapshot, ShippingSnapshot } from '../addresses/address-rules';
+import { Address } from '../addresses/entities/address.entity';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Cart } from '../cart/entities/cart.entity';
+import { CouponsService } from '../coupons/coupons.service';
+import { StockMovementReason } from '../inventory/entities/stock-movement.entity';
+import { StockMovementsService } from '../inventory/stock-movements.service';
+import { NotificationType } from '../notifications/entities/notification.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Product } from '../products/entities/product.entity';
 import { UserRole } from '../users/entities/user.entity';
 import { CancelOrderDto } from './dto/cancel-order.dto';
@@ -30,9 +38,15 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { Order, OrderStatus } from './entities/order.entity';
 import {
   buildOrderNumber,
+  DEFAULT_SHIPPING_POLICY,
   historyNote,
+  orderGrandTotal,
+  orderStatusNotice,
   sortForLocking,
   orderTotal,
+  ShippingPolicy,
+  shippingFeeFor,
+  StockCheckItem,
   stockFailures,
   validOrderTransition,
   visibleStatusEvent,
@@ -52,12 +66,29 @@ const ORDER_NUMBER_ATTEMPTS = 5;
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
 
+  private readonly shippingPolicy: ShippingPolicy;
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(OrderStatusHistory)
     private readonly statusHistory: Repository<OrderStatusHistory>,
-  ) {}
+    private readonly coupons: CouponsService,
+    private readonly stockMovements: StockMovementsService,
+    private readonly notifications: NotificationsService,
+    configService: ConfigService,
+  ) {
+    // Read once at construction: a fee that changed between two lines of the
+    // same checkout would break `total = subtotal - discount + shipping`.
+    this.shippingPolicy = {
+      flatFee:
+        configService.get<string>('SHIPPING_FLAT_FEE') ??
+        DEFAULT_SHIPPING_POLICY.flatFee,
+      freeThreshold:
+        configService.get<string>('FREE_SHIPPING_THRESHOLD') ??
+        DEFAULT_SHIPPING_POLICY.freeThreshold,
+    };
+  }
 
   async checkout(user: AuthenticatedUser, dto: CheckoutDto): Promise<Order> {
     return this.dataSource.transaction(async (manager) => {
@@ -67,12 +98,7 @@ export class OrdersService {
       });
       if (!cart?.items.length) throw new BadRequestException('Cart is empty');
       const products = new Map<string, Product>();
-      const stockChecks: Array<{
-        productId: string;
-        productName: string;
-        quantity: number;
-        available: number;
-      }> = [];
+      const stockChecks: StockCheckItem[] = [];
       // Row locks are taken in a globally deterministic order. Locking in cart
       // order lets two carts holding the same two products in opposite order
       // deadlock, and MySQL kills one with no retry wrapper above this.
@@ -81,12 +107,15 @@ export class OrdersService {
           where: { id: item.productId },
           lock: { mode: 'pessimistic_write' },
         });
-        if (!product || item.quantity > product.stock)
+        // A product can be unpublished or deleted while it sits in a cart, so
+        // availability is re-checked here and not only at add-to-cart time.
+        if (!product || !product.isActive || item.quantity > product.stock)
           stockChecks.push({
             productId: item.productId,
             productName: item.product.name,
             quantity: item.quantity,
             available: product?.stock ?? 0,
+            unavailable: !product || !product.isActive,
           });
         else products.set(product.id, product);
       }
@@ -96,24 +125,53 @@ export class OrdersService {
           message: 'Insufficient stock for one or more items',
           items: failed,
         });
-      const totalAmount = orderTotal(
+      const subtotalAmount = orderTotal(
         cart.items.map((item) => ({
           price: products.get(item.productId)!.price,
           quantity: item.quantity,
         })),
       );
+      // Spent inside this transaction, so a coupon consumed by an order that
+      // then fails its stock check rolls back with it. `preview` reserves
+      // nothing, which is why the code is re-validated here rather than trusted.
+      const redeemed = dto.couponCode
+        ? await this.coupons.redeem(
+            manager,
+            user.id,
+            dto.couponCode,
+            subtotalAmount,
+          )
+        : null;
+      const discountAmount = redeemed?.discount ?? '0.00';
+      const shippingFee = shippingFeeFor(
+        Number(subtotalAmount) - Number(discountAmount),
+        this.shippingPolicy,
+      );
+      const shipping = await this.resolveShipping(manager, user.id, dto);
       const order = await this.insertOrder(manager, {
         user: { id: user.id },
         status: OrderStatus.PENDING,
-        totalAmount,
-        recipientName: dto.recipientName.trim(),
-        phone: dto.phone.trim(),
-        addressLine: dto.addressLine.trim(),
-        ward: dto.ward?.trim() || null,
-        district: dto.district?.trim() || null,
-        city: dto.city.trim(),
+        subtotalAmount,
+        discountAmount,
+        shippingFee,
+        totalAmount: orderGrandTotal(
+          subtotalAmount,
+          discountAmount,
+          shippingFee,
+        ),
+        couponId: redeemed?.couponId ?? null,
+        couponCode: redeemed?.code ?? null,
+        paymentMethod: dto.paymentMethod,
+        ...shipping,
         note: dto.note?.trim() || null,
       });
+      if (redeemed)
+        await this.coupons.recordRedemption(manager, {
+          couponId: redeemed.couponId,
+          userId: user.id,
+          orderId: order.id,
+          discountAmount: redeemed.discount,
+        });
       // A null fromStatus marks the creation event in the audit trail.
       await this.recordTransition(
         manager,
@@ -140,8 +198,26 @@ export class OrdersService {
         const product = products.get(item.productId)!;
         product.stock -= item.quantity;
         await manager.getRepository(Product).save(product);
+        await this.stockMovements.record(manager, {
+          productId: product.id,
+          productName: product.name,
+          delta: -item.quantity,
+          balanceAfter: product.stock,
+          reason: StockMovementReason.SALE,
+          orderId: order.id,
+          actorUserId: user.id,
+        });
       }
       await manager.getRepository(CartItem).delete({ cartId: cart.id });
+      // Emitted inside the transaction: a receipt for an order that rolled back
+      // sends the customer looking for it in an empty order list.
+      await this.notifications.notify(manager, {
+        userId: user.id,
+        type: NotificationType.ORDER_PLACED,
+        title: `Đã đặt đơn ${order.orderNumber}`,
+        body: `Tổng tiền ${order.totalAmount}. Chúng tôi sẽ báo bạn khi trạng thái thay đổi.`,
+        metadata: { orderId: order.id, orderNumber: order.orderNumber },
+      });
       return this.orderWithItems(manager, order.id);
     });
   }
@@ -242,6 +318,11 @@ export class OrdersService {
         return this.cancelOrder(manager, order, actor, dto.note);
       const fromStatus = order.status;
       order.status = dto.status;
+      // Stamped once, on the first transition into PAID. A later SHIPPED or
+      // COMPLETED must not move the payment timestamp forward — it is the
+      // moment money arrived, not the moment the order last changed.
+      if (dto.status === OrderStatus.PAID && !order.paidAt)
+        order.paidAt = new Date();
       await manager.getRepository(Order).save(order);
       await this.recordTransition(
         manager,
@@ -250,6 +331,13 @@ export class OrdersService {
         dto.status,
         actor,
         dto.note,
+      );
+      await this.notifyStatusChange(
+        manager,
+        order,
+        fromStatus,
+        dto.status,
+        actor,
       );
       return this.orderWithItems(manager, order.id, true);
     });
@@ -277,6 +365,42 @@ export class OrdersService {
     });
     const viewerIsAdmin = user.role === UserRole.ADMIN;
     return events.map((event) => visibleStatusEvent(event, viewerIsAdmin));
+  }
+
+  /**
+   * Resolves the destination the order ships to and freezes it onto the order.
+   * A saved address is copied, never referenced: editing the address book
+   * afterwards must not rewrite where a past parcel went.
+   *
+   * The inline fields are non-null by the time they get here — `@ValidateIf`
+   * requires them whenever `addressId` is absent — but they are re-checked
+   * because a shipping label built from `undefined` is not a failure anyone
+   * should discover in the warehouse.
+   */
+  private async resolveShipping(
+    manager: EntityManager,
+    userId: string,
+    dto: CheckoutDto,
+  ): Promise<ShippingSnapshot> {
+    if (dto.addressId) {
+      const address = await manager
+        .getRepository(Address)
+        .findOneBy({ id: dto.addressId, userId });
+      if (!address) throw new BadRequestException('Shipping address not found');
+      return shippingSnapshot(address);
+    }
+    if (!dto.recipientName || !dto.phone || !dto.addressLine || !dto.city)
+      throw new BadRequestException(
+        'Provide addressId or the full shipping details',
+      );
+    return shippingSnapshot({
+      recipientName: dto.recipientName,
+      phone: dto.phone,
+      addressLine: dto.addressLine,
+      ward: dto.ward,
+      district: dto.district,
+      city: dto.city,
+    });
   }
 
   private async cancelOrder(
@@ -311,8 +435,20 @@ export class OrdersService {
       if (product) {
         product.stock += item.quantity;
         await manager.getRepository(Product).save(product);
+        await this.stockMovements.record(manager, {
+          productId: product.id,
+          productName: product.name,
+          delta: item.quantity,
+          balanceAfter: product.stock,
+          reason: StockMovementReason.CANCELLATION,
+          orderId: order.id,
+          actorUserId: actor.id,
+        });
       }
     }
+    // The discount budget goes back with the stock. Without this a cancelled
+    // order permanently consumes one redemption of a limited coupon.
+    await this.coupons.release(manager, order.id);
     const fromStatus = order.status;
     order.status = OrderStatus.CANCELLED;
     await manager.getRepository(Order).save(order);
@@ -324,7 +460,43 @@ export class OrdersService {
       actor,
       note,
     );
+    await this.notifyStatusChange(
+      manager,
+      order,
+      fromStatus,
+      OrderStatus.CANCELLED,
+      actor,
+    );
     return this.orderWithItems(manager, order.id, true);
+  }
+
+  /**
+   * Tells the order's owner that someone else moved their order. Silent when
+   * the actor is the owner — an inbox full of "you did the thing you just did"
+   * is what teaches people to stop reading it.
+   */
+  private async notifyStatusChange(
+    manager: EntityManager,
+    order: Order,
+    fromStatus: OrderStatus | null,
+    toStatus: OrderStatus,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    const ownerId = order.user?.id;
+    if (!ownerId) return;
+    const notice = orderStatusNotice(fromStatus, toStatus, actor.id, ownerId);
+    if (!notice) return;
+    await this.notifications.notify(manager, {
+      userId: ownerId,
+      type: NotificationType.ORDER_STATUS_CHANGED,
+      title: `${notice.title} · ${order.orderNumber}`,
+      body: notice.body,
+      metadata: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: toStatus,
+      },
+    });
   }
 
   /**

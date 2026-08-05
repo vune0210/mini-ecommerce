@@ -2,9 +2,12 @@ import type { LucideIcon } from 'lucide-react';
 import { Boxes, Package, Percent, Truck, TrendingUp, TriangleAlert, Users, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { AdminShell } from '../components/AdminShell';
+import { CategoryRevenuePanel } from '../components/admin/CategoryRevenuePanel';
+import { CouponPanel } from '../components/admin/CouponPanel';
 import { DateRangeFilter } from '../components/admin/DateRangeFilter';
 import { ExportButton } from '../components/admin/ExportButton';
 import { RevenueChart } from '../components/admin/RevenueChart';
+import { TopCustomersPanel } from '../components/admin/TopCustomersPanel';
 import { Alert, Badge, PageHeader, Panel, Skeleton } from '../components/ui';
 import { useAdminStats } from '../lib/admin-api';
 import { formatPrice, ORDER_STATUS_LABEL, ORDER_STATUS_TONE, ORDER_STATUSES } from '../lib/format';
@@ -38,7 +41,13 @@ export function AdminDashboardPage() {
         eyebrow="Tổng quan"
         title="Bảng điều khiển"
         description="Số liệu bán hàng và tình trạng kho. Chỉ đơn đã thanh toán trở lên được tính vào doanh thu."
-        action={<ExportButton kind="orders" params={{ ...range }} label="Xuất đơn hàng" />}
+        action={
+          <div className="flex flex-wrap items-start gap-2">
+            <ExportButton kind="orders" params={{ ...range }} label="Xuất đơn hàng" />
+            <ExportButton kind="products" label="Xuất sản phẩm" />
+            <ExportButton kind="customers" label="Xuất khách hàng" />
+          </div>
+        }
       />
 
       <DateRangeFilter value={range} onChange={setRange} />
@@ -55,6 +64,15 @@ export function AdminDashboardPage() {
         // Held at reduced opacity while a new range loads — a skeleton flash on
         // every date change would make the whole dashboard jump.
         <div className={`transition-opacity ${stats.isFetching ? 'opacity-60' : ''}`}>
+          {/* Without from/to the server reports all-time totals but still trails
+              the chart 30 ngày — saying so beats letting the two look inconsistent. */}
+          {data.range.appliesTo === 'series-only' && (
+            <p className="mb-4 text-sm text-slate-400">
+              Đang xem toàn thời gian: các con số tổng hợp tính trên mọi đơn, riêng biểu đồ chỉ vẽ 30
+              ngày gần nhất. Chọn một khoảng thời gian để lọc tất cả.
+            </p>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Tile
               label="Tiền thu về"
@@ -72,14 +90,15 @@ export function AdminDashboardPage() {
             />
             <Tile
               label="Khách hàng"
-              value={String(data.customers)}
+              value={String(data.customers.total)}
+              hint={`Mới trong kỳ: ${data.customers.newInRange} · Mua lại: ${data.customers.repeat}`}
               icon={Users}
               tone="bg-sky-50 text-sky-600"
             />
             <Tile
               label="Sản phẩm"
               value={String(data.products.total)}
-              hint={`Hết hàng: ${data.products.outOfStock}`}
+              hint={`Hết hàng: ${data.products.outOfStock} · Chưa xuất bản: ${data.products.unpublished}`}
               icon={Boxes}
               tone="bg-violet-50 text-violet-600"
             />
@@ -147,12 +166,7 @@ export function AdminDashboardPage() {
           </div>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-2">
-            <Panel
-              title="Bán chạy nhất"
-              icon={TrendingUp}
-              action={<ExportButton kind="products" label="Xuất sản phẩm" />}
-              bare
-            >
+            <Panel title="Bán chạy nhất" icon={TrendingUp} bare>
               {data.topProducts.length ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
@@ -185,6 +199,12 @@ export function AdminDashboardPage() {
               )}
             </Panel>
 
+            <TopCustomersPanel rows={data.topCustomers} />
+          </div>
+
+          <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <CategoryRevenuePanel rows={data.revenueByCategory} />
+
             <Panel title="Sắp hết hàng" icon={TriangleAlert} bare>
               {data.lowStock.length ? (
                 <ul className="divide-y divide-slate-50">
@@ -206,6 +226,10 @@ export function AdminDashboardPage() {
                 <p className="p-5 text-sm text-slate-500">Tồn kho đang ổn định.</p>
               )}
             </Panel>
+          </div>
+
+          <div className="mt-6">
+            <CouponPanel coupons={data.coupons} />
           </div>
         </div>
       ) : null}

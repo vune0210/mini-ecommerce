@@ -338,9 +338,11 @@ export const PRODUCT_EXPORT_COLUMNS = [
   'id',
   'name',
   'slug',
+  'sku',
   'category',
   'price',
   'stock',
+  'is_active',
   'image_url',
   'created_at',
 ] as const;
@@ -349,8 +351,10 @@ export type ProductExportRow = {
   id: string;
   name: string;
   slug: string;
+  sku?: string | null;
   price: string;
   stock: number;
+  isActive?: boolean;
   imageUrl?: string | null;
   createdAt: Date;
   category?: { name: string } | null;
@@ -361,11 +365,48 @@ export function productCsvRow(product: ProductExportRow): string {
     product.id,
     product.name,
     product.slug,
+    product.sku ?? '',
     product.category?.name ?? '',
     product.price,
     product.stock,
+    // Absent means published: the column was added after the catalogue
+    // existed, and every pre-existing product was live.
+    product.isActive === false ? 'false' : 'true',
     product.imageUrl ?? '',
     product.createdAt,
+  ]);
+}
+
+export const CUSTOMER_EXPORT_COLUMNS = [
+  'id',
+  'name',
+  'email',
+  'is_active',
+  'created_at',
+  'orders',
+  'total_spent',
+] as const;
+
+export type CustomerExportRow = {
+  id: string;
+  name: string;
+  email: string;
+  isActive: boolean;
+  createdAt: Date;
+  /** Countable orders only — PENDING and CANCELLED are not lifetime value. */
+  orders: number;
+  totalSpent: string;
+};
+
+export function customerCsvRow(customer: CustomerExportRow): string {
+  return csvLine([
+    customer.id,
+    customer.name,
+    customer.email,
+    customer.isActive ? 'true' : 'false',
+    customer.createdAt,
+    customer.orders,
+    customer.totalSpent,
   ]);
 }
 

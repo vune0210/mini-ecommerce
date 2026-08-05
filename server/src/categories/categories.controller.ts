@@ -10,12 +10,13 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../users/entities/user.entity';
 import { CategoriesService } from './categories.service';
+import { CategoryNode } from './category-rules';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { Category } from './entities/category.entity';
@@ -25,8 +26,21 @@ import { Category } from './entities/category.entity';
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
-  @Get() findAll(): Promise<Category[]> {
+  @Get()
+  @ApiOkResponse({
+    description:
+      'Flat list, each row carrying productCount — the number of published products filed directly under it.',
+  })
+  findAll(): Promise<Category[]> {
     return this.categoriesService.findAll();
+  }
+  @Get('tree')
+  @ApiOkResponse({
+    description:
+      'The same categories nested by parent. Declared before :id so "tree" is not read as an identifier.',
+  })
+  tree(): Promise<CategoryNode<Category>[]> {
+    return this.categoriesService.tree();
   }
   @Get(':id') findOne(@Param('id') id: string): Promise<Category> {
     return this.categoriesService.findOne(id);

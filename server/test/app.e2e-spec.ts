@@ -508,15 +508,15 @@ describe('API e2e (MySQL test database)', () => {
         .get('/api/admin/stats?lowStockThreshold=5')
         .set(bearer(admin.token));
       expect(stats.status).toBe(200);
-      // Widened, not weakened: the original three figures survive verbatim;
-      // merchandise/discounts/shipping stay zero until the commerce bundle's
-      // money-breakdown migration adds their source columns.
+      // The money-breakdown migration has landed, so merchandise now reports
+      // the real line total. The documented invariant must hold on it:
+      // merchandise - discounts + shipping === net.
       expect(stats.body.revenue).toEqual(
         expect.objectContaining({
           net: '25.00',
           completed: '25.00',
           cancelled: '0.00',
-          merchandise: '0.00',
+          merchandise: '25.00',
           discounts: '0.00',
           shipping: '0.00',
         }),

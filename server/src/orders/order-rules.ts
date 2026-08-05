@@ -5,15 +5,26 @@ export type StockCheckItem = {
   productName: string;
   quantity: number;
   available: number;
+  /** True when the product was unpublished or deleted while it sat in the cart. */
+  unavailable?: boolean;
 };
+/**
+ * The lines a checkout must refuse, with the reason attached. "Only 2 left" and
+ * "no longer sold" send the customer to completely different next actions, and
+ * an unpublished product reported as `available: 0` reads as a restock that is
+ * never coming.
+ */
 export function stockFailures(items: StockCheckItem[]) {
   return items
-    .filter((item) => item.quantity > item.available)
+    .filter((item) => item.unavailable || item.quantity > item.available)
     .map((item) => ({
       productId: item.productId,
       productName: item.productName,
       requested: item.quantity,
       available: item.available,
+      reason: item.unavailable
+        ? ('unavailable' as const)
+        : ('insufficient-stock' as const),
     }));
 }
 /**
@@ -41,6 +52,62 @@ export function orderTotal(
   return items
     .reduce((total, item) => total + Number(item.price) * item.quantity, 0)
     .toFixed(2);
+}
+
+export type ShippingPolicy = {
+  /** Charged on every order below the threshold. */
+  flatFee: string;
+  /** Subtotal at or above which delivery is free; null disables the waiver. */
+  freeThreshold: string | null;
+};
+
+/**
+ * A zero fee by default, so an untouched deployment prices exactly as it did
+ * before shipping existed. Both values come from the environment, which keeps
+ * the number a business decision rather than a redeploy.
+ */
+export const DEFAULT_SHIPPING_POLICY: ShippingPolicy = {
+  flatFee: '0.00',
+  freeThreshold: null,
+};
+
+/**
+ * The threshold compares against the *discounted* subtotal on purpose: a
+ * coupon that drops a cart under the free-delivery bar should also drop the
+ * free delivery, or the discount silently pays for the courier too.
+ */
+export function shippingFeeFor(
+  payableSubtotal: string | number,
+  policy: ShippingPolicy = DEFAULT_SHIPPING_POLICY,
+): string {
+  const fee = Number(policy.flatFee);
+  if (!Number.isFinite(fee) || fee <= 0) return '0.00';
+  if (policy.freeThreshold !== null) {
+    const threshold = Number(policy.freeThreshold);
+    if (Number.isFinite(threshold) && Number(payableSubtotal) >= threshold)
+      return '0.00';
+  }
+  return fee.toFixed(2);
+}
+
+/**
+ * The single definition of what an order costs. Every caller goes through it so
+ * the invariant `total = subtotal - discount + shipping` cannot drift between
+ * checkout, the CSV export and the revenue rollup.
+ *
+ * Clamped at zero: a discount larger than the merchandise must not turn
+ * shipping into a payout.
+ */
+export function orderGrandTotal(
+  subtotal: string | number,
+  discount: string | number,
+  shipping: string | number,
+): string {
+  const total =
+    Number(subtotal) - Number(discount ?? 0) + Number(shipping ?? 0);
+  return Math.max(0, Math.round((total + Number.EPSILON) * 100) / 100).toFixed(
+    2,
+  );
 }
 const ORDER_NUMBER_ALPHABET = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const ORDER_NUMBER_SUFFIX_LENGTH = 5;
@@ -117,6 +184,51 @@ export function visibleStatusEvent(
     createdAt: event.createdAt,
   };
 }
+/** Customer-facing Vietnamese wording for each status an order can reach. */
+const STATUS_NOTICE: Record<OrderStatus, { title: string; body: string }> = {
+  PENDING: {
+    title: 'Đơn hàng đã được tạo',
+    body: 'Chúng tôi đã nhận đơn của bạn và đang chờ thanh toán.',
+  },
+  PAID: {
+    title: 'Đã nhận thanh toán',
+    body: 'Đơn hàng của bạn đã được thanh toán và đang chuẩn bị giao.',
+  },
+  SHIPPED: {
+    title: 'Đơn hàng đang giao',
+    body: 'Đơn hàng của bạn đã được bàn giao cho đơn vị vận chuyển.',
+  },
+  COMPLETED: {
+    title: 'Đơn hàng hoàn tất',
+    body: 'Cảm ơn bạn! Bạn có thể đánh giá sản phẩm đã mua.',
+  },
+  CANCELLED: {
+    title: 'Đơn hàng đã huỷ',
+    body: 'Đơn hàng đã được huỷ và hàng đã được trả về kho.',
+  },
+};
+
+/**
+ * The notification an order transition should produce, or null when it should
+ * produce none.
+ *
+ * Two silences are deliberate. A customer who just cancelled their own order
+ * does not need to be told they cancelled it — the inbox is for things that
+ * happened *to* them, and self-inflicted noise is what trains people to ignore
+ * it. And the PENDING creation event is skipped here because checkout emits its
+ * own receipt; sending both would double-notify every order ever placed.
+ */
+export function orderStatusNotice(
+  fromStatus: OrderStatus | null,
+  toStatus: OrderStatus,
+  actorId: string,
+  ownerId: string,
+): { title: string; body: string } | null {
+  if (fromStatus === null) return null;
+  if (actorId === ownerId) return null;
+  return STATUS_NOTICE[toStatus];
+}
+
 const transitions: Record<OrderStatus, OrderStatus[]> = {
   PENDING: [OrderStatus.PAID, OrderStatus.CANCELLED],
   PAID: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],

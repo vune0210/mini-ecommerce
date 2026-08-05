@@ -404,7 +404,9 @@ describe('Admin operations e2e (users, order history, stats, exports)', () => {
       expect(text.charCodeAt(0)).toBe(0xfeff); // BOM survives for Excel
       const lines = text.slice(1).split('\n').filter(Boolean);
       expect(lines.length).toBeGreaterThanOrEqual(2); // header + 1 order
-      expect(lines[0]).toContain('orderNumber');
+      // The header is the snake_case column list, not the entity field names.
+      expect(lines[0]).toContain('order_number');
+      expect(lines[0]).toContain('order_discount');
 
       // Customers get 403, not an empty file.
       expect(

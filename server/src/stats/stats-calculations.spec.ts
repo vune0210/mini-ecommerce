@@ -5,11 +5,13 @@ import {
   countableOrders,
   csvCell,
   csvLine,
+  customerCsvRow,
   dailySeries,
   emptyStatusCounts,
   exportFilename,
   ORDER_EXPORT_COLUMNS,
   orderCsvRows,
+  PRODUCT_EXPORT_COLUMNS,
   productCsvRow,
   reportingRange,
   revenueBreakdown,
@@ -334,13 +336,47 @@ describe('csv serialization', () => {
         id: 'p-1',
         name: 'Ao thun',
         slug: 'ao-thun',
+        sku: 'AO-THUN-M',
         price: '19.99',
         stock: 4,
+        isActive: true,
         imageUrl: null,
         createdAt: new Date('2026-07-01T00:00:00.000Z'),
         category: { name: 'Ao' },
       }),
-    ).toBe('p-1,Ao thun,ao-thun,Ao,19.99,4,,2026-07-01T00:00:00.000Z\r\n');
+    ).toBe(
+      'p-1,Ao thun,ao-thun,AO-THUN-M,Ao,19.99,4,true,,2026-07-01T00:00:00.000Z\r\n',
+    );
+  });
+
+  /** Rows predating the SKU and publication columns must stay aligned. */
+  it('treats a product with no publication flag as published', () => {
+    const row = productCsvRow({
+      id: 'p-2',
+      name: 'Cu',
+      slug: 'cu',
+      price: '1.00',
+      stock: 0,
+      createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    });
+    expect(row.split(',')).toHaveLength(PRODUCT_EXPORT_COLUMNS.length);
+    expect(row).toBe('p-2,Cu,cu,,,1.00,0,true,,2026-07-01T00:00:00.000Z\r\n');
+  });
+
+  it('serializes a customer row with lifetime value', () => {
+    expect(
+      customerCsvRow({
+        id: 'u-1',
+        name: 'Nguyen Van A',
+        email: 'a@example.com',
+        isActive: true,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        orders: 3,
+        totalSpent: '1290000.00',
+      }),
+    ).toBe(
+      'u-1,Nguyen Van A,a@example.com,true,2026-07-01T00:00:00.000Z,3,1290000.00\r\n',
+    );
   });
 
   it('dates the export filename', () => {

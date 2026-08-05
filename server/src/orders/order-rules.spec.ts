@@ -3,8 +3,11 @@ import {
   buildOrderNumber,
   formatShippingAddress,
   historyNote,
+  orderGrandTotal,
+  orderStatusNotice,
   sortForLocking,
   orderTotal,
+  shippingFeeFor,
   stockFailures,
   validOrderTransition,
   visibleStatusEvent,
@@ -82,8 +85,89 @@ describe('order rules', () => {
         { productId: 'b', productName: 'B', quantity: 1, available: 1 },
       ]),
     ).toEqual([
-      { productId: 'a', productName: 'A', requested: 3, available: 2 },
+      {
+        productId: 'a',
+        productName: 'A',
+        requested: 3,
+        available: 2,
+        reason: 'insufficient-stock',
+      },
     ]);
+  });
+
+  /**
+   * "Only 2 left" and "no longer sold" send the customer to different actions,
+   * so an unpublished product must not be reported as a stock shortfall.
+   */
+  it('separates an unavailable product from a stock shortfall', () => {
+    expect(
+      stockFailures([
+        {
+          productId: 'gone',
+          productName: 'Gone',
+          quantity: 1,
+          available: 9,
+          unavailable: true,
+        },
+      ]),
+    ).toEqual([
+      {
+        productId: 'gone',
+        productName: 'Gone',
+        requested: 1,
+        available: 9,
+        reason: 'unavailable',
+      },
+    ]);
+  });
+
+  describe('shippingFeeFor', () => {
+    it('is free when no policy is configured', () => {
+      expect(shippingFeeFor('1000000.00')).toBe('0.00');
+    });
+
+    it('charges the flat fee below the threshold', () => {
+      expect(
+        shippingFeeFor('200000.00', {
+          flatFee: '30000',
+          freeThreshold: '500000',
+        }),
+      ).toBe('30000.00');
+    });
+
+    it('waives the fee at the threshold, not just above it', () => {
+      const policy = { flatFee: '30000', freeThreshold: '500000' };
+      expect(shippingFeeFor('500000.00', policy)).toBe('0.00');
+      expect(shippingFeeFor('499999.99', policy)).toBe('30000.00');
+    });
+
+    it('charges every order when no threshold is set', () => {
+      expect(
+        shippingFeeFor('9999999.00', { flatFee: '30000', freeThreshold: null }),
+      ).toBe('30000.00');
+    });
+
+    it('ignores a malformed fee rather than charging NaN', () => {
+      expect(
+        shippingFeeFor('100.00', { flatFee: 'free', freeThreshold: null }),
+      ).toBe('0.00');
+    });
+  });
+
+  describe('orderGrandTotal', () => {
+    it('applies the discount before adding shipping', () => {
+      expect(orderGrandTotal('500000.00', '50000.00', '30000.00')).toBe(
+        '480000.00',
+      );
+    });
+
+    it('never returns a negative total', () => {
+      expect(orderGrandTotal('10.00', '999.00', '0.00')).toBe('0.00');
+    });
+
+    it('always lands on two decimals', () => {
+      expect(orderGrandTotal('0.1', '0', '0.2')).toBe('0.30');
+    });
   });
   it('normalizes history notes to trimmed text or null', () => {
     expect(historyNote('  Payment confirmed  ')).toBe('Payment confirmed');
@@ -145,5 +229,54 @@ describe('order rules', () => {
     expect(
       validOrderTransition(OrderStatus.COMPLETED, OrderStatus.PENDING),
     ).toBe(false);
+  });
+});
+
+describe('orderStatusNotice', () => {
+  const owner = 'customer-1';
+  const admin = 'admin-1';
+
+  it('describes a staff-driven transition to the owner', () => {
+    expect(
+      orderStatusNotice(OrderStatus.PENDING, OrderStatus.PAID, admin, owner),
+    ).toEqual({
+      title: 'Đã nhận thanh toán',
+      body: 'Đơn hàng của bạn đã được thanh toán và đang chuẩn bị giao.',
+    });
+  });
+
+  /** The inbox is for things that happened *to* you, not things you just did. */
+  it('stays silent when the owner acted on their own order', () => {
+    expect(
+      orderStatusNotice(
+        OrderStatus.PENDING,
+        OrderStatus.CANCELLED,
+        owner,
+        owner,
+      ),
+    ).toBeNull();
+  });
+
+  /** Checkout emits its own receipt; this would make it two. */
+  it('stays silent on the creation event', () => {
+    expect(
+      orderStatusNotice(null, OrderStatus.PENDING, owner, owner),
+    ).toBeNull();
+    expect(
+      orderStatusNotice(null, OrderStatus.PENDING, admin, owner),
+    ).toBeNull();
+  });
+
+  it('has wording for every status an order can reach', () => {
+    for (const status of Object.values(OrderStatus)) {
+      const notice = orderStatusNotice(
+        OrderStatus.PENDING,
+        status,
+        admin,
+        owner,
+      );
+      expect(notice?.title).toBeTruthy();
+      expect(notice?.body).toBeTruthy();
+    }
   });
 });

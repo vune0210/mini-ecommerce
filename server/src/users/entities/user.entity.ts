@@ -40,6 +40,19 @@ export class User {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  /**
+   * When the address was first proven, or null while it is unproven. Accounts
+   * that predate verification were backfilled by AddAuthTokens: an upgrade must
+   * not retroactively mark the entire user base unverified.
+   */
+  @Column({
+    name: 'email_verified_at',
+    type: 'datetime',
+    precision: 6,
+    nullable: true,
+  })
+  emailVerifiedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

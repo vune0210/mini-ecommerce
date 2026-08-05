@@ -8,10 +8,14 @@ import { Readable } from 'node:stream';
 import { In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { Product } from '../products/entities/product.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { ExportOrdersDto } from './dto/export-orders.dto';
 import {
+  COUNTABLE_ORDER_STATUSES,
   CSV_BOM,
   csvLine,
+  CUSTOMER_EXPORT_COLUMNS,
+  customerCsvRow,
   exportFilename,
   ORDER_EXPORT_COLUMNS,
   orderCsvRows,
@@ -30,6 +34,7 @@ export class ExportsService {
   constructor(
     @InjectRepository(Order) private readonly orders: Repository<Order>,
     @InjectRepository(Product) private readonly products: Repository<Product>,
+    @InjectRepository(User) private readonly users: Repository<User>,
   ) {}
 
   orderExport(query: ExportOrdersDto): StreamableFile {
@@ -41,6 +46,10 @@ export class ExportsService {
 
   productExport(): StreamableFile {
     return this.download(this.productCsv(), 'products');
+  }
+
+  customerExport(): StreamableFile {
+    return this.download(this.customerCsv(), 'customers');
   }
 
   /**
@@ -81,6 +90,62 @@ export class ExportsService {
       for (const product of batch) yield productCsvRow(product);
       if (batch.length < batchSize) return;
       cursor = batch[batch.length - 1].slug;
+    }
+  }
+
+  /**
+   * Customers with lifetime value attached. The order aggregate is a LEFT JOIN
+   * over countable statuses only, so a customer who has only ever had a
+   * cancelled order exports as 0 / 0.00 rather than being dropped from the
+   * list — an export of "customers" that silently omits customers is a trap.
+   */
+  async *customerCsv(batchSize = EXPORT_BATCH_SIZE): AsyncGenerator<string> {
+    yield CSV_BOM + csvLine(CUSTOMER_EXPORT_COLUMNS);
+    let cursor: string | null = null;
+    for (;;) {
+      const builder = this.users
+        .createQueryBuilder('user')
+        .leftJoin(
+          Order,
+          'order',
+          'order.user_id = user.id AND order.status IN (:...countable)',
+          { countable: COUNTABLE_ORDER_STATUSES },
+        )
+        .select('user.id', 'id')
+        .addSelect('user.name', 'name')
+        .addSelect('user.email', 'email')
+        .addSelect('user.is_active', 'isActive')
+        .addSelect('user.created_at', 'createdAt')
+        .addSelect('COUNT(order.id)', 'orders')
+        .addSelect('COALESCE(SUM(order.total_amount), 0)', 'totalSpent')
+        .where('user.role = :role', { role: UserRole.CUSTOMER })
+        .groupBy('user.id')
+        // Keyset page on the unique email, so no OFFSET scan and no risk of a
+        // concurrent sign-up shifting rows between pages.
+        .orderBy('user.email', 'ASC')
+        .limit(batchSize);
+      if (cursor !== null) builder.andWhere('user.email > :cursor', { cursor });
+      const batch = await builder.getRawMany<{
+        id: string;
+        name: string;
+        email: string;
+        isActive: number | boolean;
+        createdAt: Date;
+        orders: string;
+        totalSpent: string;
+      }>();
+      for (const row of batch)
+        yield customerCsvRow({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          isActive: Boolean(row.isActive),
+          createdAt: new Date(row.createdAt),
+          orders: Number(row.orders),
+          totalSpent: Number(row.totalSpent).toFixed(2),
+        });
+      if (batch.length < batchSize) return;
+      cursor = batch[batch.length - 1].email;
     }
   }
 

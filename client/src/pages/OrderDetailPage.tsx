@@ -1,11 +1,17 @@
-import { ArrowLeft, Ban, Check, History, MapPin, Package, PackageX, Phone, Truck, Wallet } from 'lucide-react';
+import { ArrowLeft, Ban, Check, History, MapPin, Package, PackageX, Phone, Ticket, Truck, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { OrderStatusTimeline } from '../components/OrderStatusTimeline';
 import { Alert, EmptyState, Panel, Skeleton, StatusBadge } from '../components/ui';
 import { formatDateTime, formatPrice, shippingAddress } from '../lib/format';
-import { orderErrorMessage, useCancelOrder, useOrder, useOrderHistory } from '../lib/order-api';
+import {
+  orderErrorMessage,
+  PAYMENT_METHOD_LABEL,
+  useCancelOrder,
+  useOrder,
+  useOrderHistory,
+} from '../lib/order-api';
 import type { OrderStatus } from '../types/order';
 
 const steps: Array<{ status: OrderStatus; label: string; icon: typeof Check }> = [
@@ -138,7 +144,31 @@ export function OrderDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Tạm tính</dt>
-                  <dd className="font-medium text-slate-900">{formatPrice(order.totalAmount)}</dd>
+                  <dd className="font-medium text-slate-900">
+                    {formatPrice(order.subtotalAmount)}
+                  </dd>
+                </div>
+                {Number(order.discountAmount) > 0 && (
+                  <div className="flex justify-between gap-3">
+                    <dt className="flex min-w-0 items-center gap-1.5 text-emerald-700">
+                      <Ticket className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      <span className="truncate">
+                        Giảm giá
+                        {/* couponCode outlives a deleted coupon row, so it is the
+                            only thing that can name the discount afterwards. */}
+                        {order.couponCode && ` (${order.couponCode})`}
+                      </span>
+                    </dt>
+                    <dd className="whitespace-nowrap font-medium text-emerald-700">
+                      −{formatPrice(order.discountAmount)}
+                    </dd>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <dt className="text-slate-500">Phí vận chuyển</dt>
+                  <dd className="font-medium text-slate-900">
+                    {Number(order.shippingFee) > 0 ? formatPrice(order.shippingFee) : 'Miễn phí'}
+                  </dd>
                 </div>
               </dl>
               <div className="mt-3 flex items-baseline justify-between border-t border-slate-100 pt-3">
@@ -147,6 +177,22 @@ export function OrderDetailPage() {
                   {formatPrice(order.totalAmount)}
                 </span>
               </div>
+              <dl className="mt-3 space-y-2 border-t border-slate-100 pt-3 text-sm">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-500">Phương thức</dt>
+                  <dd className="text-right font-medium text-slate-900">
+                    {PAYMENT_METHOD_LABEL[order.paymentMethod]}
+                  </dd>
+                </div>
+                {order.paidAt && (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-slate-500">Đã thanh toán lúc</dt>
+                    <dd className="text-right font-medium text-emerald-700">
+                      {formatDateTime(order.paidAt)}
+                    </dd>
+                  </div>
+                )}
+              </dl>
             </Panel>
           </div>
 

@@ -1,7 +1,10 @@
-import { LayoutDashboard, LogOut, Menu, Package, Receipt, ShieldCheck, ShoppingBag, ShoppingCart, X } from 'lucide-react';
+import { Bell, Heart, LayoutDashboard, LogOut, Menu, Package, Receipt, ShieldCheck, ShoppingBag, ShoppingCart, User, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { NotificationBell } from './NotificationBell';
+import { apiVoid } from '../lib/api-client';
 import { useCart } from '../lib/cart-api';
+import { useWishlist } from '../lib/wishlist-api';
 import { useAuthStore } from '../stores/auth-store';
 
 const linkClass = ({ isActive }: { isActive: boolean }): string =>
@@ -15,13 +18,25 @@ export function AppNav() {
   const navigate = useNavigate();
   const location = useLocation();
   const cartQuery = useCart();
+  const wishlistQuery = useWishlist();
   const [menuOpen, setMenuOpen] = useState(false);
   const cartCount = cartQuery.data?.totalItems ?? 0;
+  const wishlistCount = wishlistQuery.data?.length ?? 0;
 
   // Navigating away must close the drawer, or it covers the new page.
   useEffect(() => setMenuOpen(false), [location.pathname]);
 
-  function logOut(): void {
+  async function logOut(): Promise<void> {
+    const refreshToken = useAuthStore.getState().tokens?.refreshToken;
+    // Tell the server first so the refresh session is actually revoked;
+    // clearing only local storage would leave a live seven-day token behind.
+    // A failure here must still log the user out locally, so it is swallowed.
+    if (refreshToken)
+      await apiVoid('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      }).catch(() => undefined);
     clearAuth();
     navigate('/login');
   }
@@ -30,7 +45,10 @@ export function AppNav() {
     ? [
         { to: '/products', label: 'Sản phẩm', icon: Package },
         { to: '/orders', label: 'Đơn hàng', icon: Receipt },
-        { to: '/dashboard', label: 'Tài khoản', icon: LayoutDashboard },
+        { to: '/wishlist', label: 'Yêu thích', icon: Heart },
+        { to: '/notifications', label: 'Thông báo', icon: Bell },
+        { to: '/account', label: 'Tài khoản', icon: User },
+        { to: '/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
         ...(user.role === 'ADMIN'
           ? [{ to: '/admin', label: 'Quản trị', icon: ShieldCheck }]
           : []),
@@ -59,6 +77,18 @@ export function AppNav() {
           {user ? (
             <>
               <Link
+                className="relative hidden rounded-lg p-2.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 sm:block"
+                to="/wishlist"
+                aria-label={`Yêu thích, ${wishlistCount} sản phẩm`}
+              >
+                <Heart className="h-5 w-5" aria-hidden />
+                {wishlistCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[11px] font-bold text-white">
+                    {wishlistCount > 99 ? '99+' : wishlistCount}
+                  </span>
+                )}
+              </Link>
+              <Link
                 className="relative rounded-lg p-2.5 text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
                 to="/cart"
                 aria-label={`Giỏ hàng, ${cartCount} sản phẩm`}
@@ -70,6 +100,7 @@ export function AppNav() {
                   </span>
                 )}
               </Link>
+              <NotificationBell />
               <span className="hidden max-w-36 truncate text-sm font-medium text-slate-700 lg:inline">
                 {user.name}
               </span>

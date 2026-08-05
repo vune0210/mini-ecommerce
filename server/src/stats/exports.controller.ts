@@ -40,9 +40,19 @@ export class ExportsController {
   @ApiProduces('text/csv')
   @ApiOkResponse({
     description:
-      'CSV download of the product catalogue, streamed as an attachment with a dated filename.',
+      'CSV download of the product catalogue — SKU and publication state included — streamed as an attachment with a dated filename.',
   })
   productsCsv(): StreamableFile {
     return this.exports.productExport();
+  }
+
+  @Get('customers.csv')
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description:
+      'CSV download of customer accounts with lifetime order count and spend. Spend counts PAID/SHIPPED/COMPLETED orders only.',
+  })
+  customersCsv(): StreamableFile {
+    return this.exports.customerExport();
   }
 }

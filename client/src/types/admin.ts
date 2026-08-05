@@ -2,8 +2,10 @@ import type { Category, Product } from './catalog';
 import type { UserRole } from './auth';
 import type { Order, OrderStatus } from './order';
 
-export type CategoryInput = { name: string; slug: string };
-export type ProductInput = { name: string; slug: string; description: string; price: number; stock: number; imageUrl?: string; categoryId: string };
+export type CategoryInput = { name: string; slug: string; parentId?: string | null };
+export type ProductInput = { name: string; slug: string; description: string; price: number; stock: number; imageUrl?: string; sku?: string; isActive?: boolean; categoryId: string };
+/** Absolute stock level, never a delta — a retried request must not count twice. */
+export type StockAdjustmentInput = { id: string; stock: number; reason?: 'ADJUSTMENT' | 'RESTOCK'; note?: string };
 export type AdminOrder = Order & { user: { id: string; email: string; name: string } };
 export type AdminOrderListResponse = { items: AdminOrder[]; total: number; page: number; limit: number };
 export type UpdateOrderStatusInput = { id: string; status: OrderStatus; note?: string };
@@ -39,9 +41,23 @@ export type AdminStats = {
     byStatus: Record<OrderStatus, number>;
     averageOrderValue: string;
   };
-  customers: number;
-  products: { total: number; outOfStock: number };
+  customers: {
+    total: number;
+    /** Sign-ups inside the window; equals total when the range is all-time. */
+    newInRange: number;
+    /** Customers with more than one countable order in the window. */
+    repeat: number;
+  };
+  products: { total: number; outOfStock: number; unpublished: number };
   topProducts: Array<{ productId: string | null; productName: string; quantitySold: number; revenue: string }>;
+  topCustomers: Array<{ userId: string; name: string; email: string; orders: number; revenue: string }>;
+  revenueByCategory: Array<{ categoryId: string | null; categoryName: string; quantitySold: number; revenue: string }>;
+  /** Read from the redemption ledger, so a cancelled order stops counting. */
+  coupons: {
+    redemptions: number;
+    discountTotal: string;
+    topCodes: Array<{ code: string; redemptions: number; discount: string }>;
+  };
   lowStock: Array<{ id: string; name: string; slug: string; stock: number }>;
   series: DailyPoint[];
 };
@@ -76,7 +92,7 @@ export type OrderStatusEvent = {
   createdAt: string;
 };
 
-export type ExportKind = 'orders' | 'products';
+export type ExportKind = 'orders' | 'products' | 'customers';
 export type ExportQuery = { from?: string; to?: string; status?: '' | OrderStatus };
 
 export type AdminProduct = Product;

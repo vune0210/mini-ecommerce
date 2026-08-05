@@ -5,6 +5,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PassportStrategy } from '@nestjs/passport';
 import { Repository } from 'typeorm';
 import { JwtPayload, AuthenticatedUser } from '../auth.types';
+import { isEmailVerified } from '../token-rules';
 import { User } from '../../users/entities/user.entity';
 
 @Injectable()
@@ -35,6 +36,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: user.email,
       name: user.name,
       role: user.role,
+      // Read from the row, not the token, so clicking the verification link
+      // takes effect on the very next request without a re-login.
+      emailVerified: isEmailVerified(user),
+      // Null for tokens minted before refresh sessions existed; session-aware
+      // endpoints degrade rather than assume the claim is present.
+      sessionId: payload.sid ?? null,
     };
   }
 }

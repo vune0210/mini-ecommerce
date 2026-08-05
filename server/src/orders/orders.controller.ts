@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -9,8 +10,15 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiHeader,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthenticatedUser } from '../auth/auth.types';
+import { IdempotencyService } from '../common/idempotency/idempotency.service';
+import { normalizeIdempotencyKey } from '../common/idempotency/idempotency-rules';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -26,12 +34,32 @@ import { OrdersService } from './orders.service';
 @UseGuards(JwtAuthGuard)
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
-  @Post('checkout') checkout(
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly idempotency: IdempotencyService,
+  ) {}
+
+  @Post('checkout')
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'Optional client-generated key, 8-128 chars of [A-Za-z0-9._:-]. Retrying with the same key and the same body replays the original order instead of placing a second one. Reusing it with a different body is a 409, and so is a retry that arrives while the first is still running.',
+  })
+  checkout(
     @Request() request: { user: AuthenticatedUser },
     @Body() dto: CheckoutDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.orders.checkout(request.user, dto);
+    // Opt-in: a caller that sends no key runs exactly as it always did, so the
+    // header can be adopted client by client rather than in one flag day.
+    return this.idempotency.run(
+      request.user.id,
+      'orders.checkout',
+      normalizeIdempotencyKey(idempotencyKey),
+      dto,
+      () => this.orders.checkout(request.user, dto),
+    );
   }
   @Get() list(
     @Request() request: { user: AuthenticatedUser },

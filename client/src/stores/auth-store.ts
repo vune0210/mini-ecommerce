@@ -6,6 +6,8 @@ type AuthState = {
   user: AuthUser | null;
   tokens: AuthTokens | null;
   setAuth: (user: AuthUser, tokens: AuthTokens) => void;
+  /** Replaces the whole pair — /auth/refresh rotates the refresh token too. */
+  setTokens: (tokens: AuthTokens) => void;
   setAccessToken: (accessToken: string) => void;
   clearAuth: () => void;
 };
@@ -16,6 +18,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       tokens: null,
       setAuth: (user, tokens) => set({ user, tokens }),
+      setTokens: (tokens) => set({ tokens }),
       setAccessToken: (accessToken) =>
         set((state) => ({
           tokens: state.tokens ? { ...state.tokens, accessToken } : null,

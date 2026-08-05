@@ -11,8 +11,10 @@ import {
 import { Product } from '../../products/entities/product.entity';
 import { Cart } from './cart.entity';
 
+// The constraint name matches AddCart so migration:generate does not propose
+// dropping and recreating it.
 @Entity({ name: 'cart_items' })
-@Unique(['cartId', 'productId'])
+@Unique('UQ_cart_items_cart_product', ['cartId', 'productId'])
 export class CartItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;

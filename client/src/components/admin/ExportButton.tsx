@@ -1,10 +1,11 @@
 import { Download, LoaderCircle } from 'lucide-react';
 import { useState } from 'react';
 import { adminError, exportCsv } from '../../lib/admin-api';
-import type { ExportQuery } from '../../types/admin';
+import type { ExportKind, ExportQuery } from '../../types/admin';
 
 type Props = {
-  kind: 'orders' | 'products';
+  /** Only `orders` reads the query — products and customers export in full. */
+  kind: ExportKind;
   params?: ExportQuery;
   label?: string;
   className?: string;

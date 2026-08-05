@@ -1,8 +1,8 @@
-import { ChevronRight, Receipt } from 'lucide-react';
+import { ChevronRight, Receipt, Ticket } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
-import { Alert, EmptyState, PageHeader, Pagination, SkeletonList, StatusBadge } from '../components/ui';
+import { Alert, Badge, EmptyState, PageHeader, Pagination, SkeletonList, StatusBadge } from '../components/ui';
 import { formatDateTime, formatPrice, ORDER_STATUS_LABEL, ORDER_STATUSES } from '../lib/format';
 import { ORDER_PAGE_SIZE, useOrders } from '../lib/order-api';
 import type { OrderStatus } from '../types/order';
@@ -68,31 +68,49 @@ export function OrderHistoryPage() {
       ) : (
         <>
           <div className="space-y-3">
-            {orders.data.items.map((order) => (
-              <Link
-                className="card group flex items-center gap-4 p-5 transition hover:border-brand-200 hover:shadow-card-hover"
-                to={`/orders/${order.id}`}
-                key={order.id}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <p className="font-semibold tracking-tight text-slate-900">{order.orderNumber}</p>
-                    <StatusBadge status={order.status} />
+            {orders.data.items.map((order) => {
+              const discount = Number(order.discountAmount);
+              return (
+                <Link
+                  className="card group flex items-center gap-4 p-5 transition hover:border-brand-200 hover:shadow-card-hover"
+                  to={`/orders/${order.id}`}
+                  key={order.id}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <p className="font-semibold tracking-tight text-slate-900">
+                        {order.orderNumber}
+                      </p>
+                      <StatusBadge status={order.status} />
+                      {discount > 0 && (
+                        <Badge tone="emerald">
+                          <Ticket className="h-3 w-3" aria-hidden />
+                          {order.couponCode ?? 'Đã giảm giá'}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="mt-1.5 text-sm text-slate-500">
+                      {formatDateTime(order.createdAt)}
+                    </p>
+                    <p className="mt-0.5 truncate text-sm text-slate-500">
+                      {order.items.length} sản phẩm · Giao tới {order.recipientName}, {order.city}
+                    </p>
                   </div>
-                  <p className="mt-1.5 text-sm text-slate-500">{formatDateTime(order.createdAt)}</p>
-                  <p className="mt-0.5 truncate text-sm text-slate-500">
-                    {order.items.length} sản phẩm · Giao tới {order.recipientName}, {order.city}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-bold text-slate-900">{formatPrice(order.totalAmount)}</p>
-                </div>
-                <ChevronRight
-                  className="h-5 w-5 shrink-0 text-slate-300 transition-colors group-hover:text-brand-600"
-                  aria-hidden
-                />
-              </Link>
-            ))}
+                  <div className="shrink-0 text-right">
+                    <p className="font-bold text-slate-900">{formatPrice(order.totalAmount)}</p>
+                    {discount > 0 && (
+                      <p className="mt-0.5 text-xs font-medium text-emerald-700">
+                        −{formatPrice(order.discountAmount)}
+                      </p>
+                    )}
+                  </div>
+                  <ChevronRight
+                    className="h-5 w-5 shrink-0 text-slate-300 transition-colors group-hover:text-brand-600"
+                    aria-hidden
+                  />
+                </Link>
+              );
+            })}
           </div>
           <Pagination
             page={page}

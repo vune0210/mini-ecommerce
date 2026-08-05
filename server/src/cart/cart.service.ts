@@ -12,13 +12,15 @@ import { CartItem } from './entities/cart-item.entity';
 import { Cart } from './entities/cart.entity';
 import { cartTotals } from './cart-calculations';
 
-type CartResponse = {
+export type CartResponse = {
   id: string;
   items: Array<{
     id: string;
     quantity: number;
     product: Product;
     subtotal: string;
+    /** False when the line can no longer be checked out as it stands. */
+    available: boolean;
   }>;
   totalItems: number;
   totalAmount: string;
@@ -98,6 +100,10 @@ export class CartService {
   private async product(id: string): Promise<Product> {
     const product = await this.products.findOneBy({ id });
     if (!product) throw new NotFoundException('Product not found');
+    // Unpublished products are invisible to the storefront, so an add-to-cart
+    // naming one came from a stale page or a crafted request either way.
+    if (!product.isActive)
+      throw new BadRequestException('Product is no longer available');
     return product;
   }
 
@@ -115,6 +121,10 @@ export class CartService {
       quantity: item.quantity,
       product: item.product,
       subtotal: totals.subtotals[index],
+      // Surfaced per line rather than silently dropped: a cart that quietly
+      // loses an item is how a customer discovers at delivery that half the
+      // order was never placed.
+      available: item.product.isActive && item.quantity <= item.product.stock,
     }));
     return {
       id: cart.id,

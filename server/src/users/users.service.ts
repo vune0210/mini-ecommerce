@@ -4,8 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { AuthenticatedUser } from '../auth/auth.types';
+import {
+  RefreshSession,
+  SessionRevokeReason,
+} from '../auth/entities/refresh-session.entity';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
@@ -31,6 +35,8 @@ export class UsersService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(RefreshSession)
+    private readonly sessions: Repository<RefreshSession>,
   ) {}
 
   /**
@@ -82,7 +88,21 @@ export class UsersService {
   ): Promise<PublicUser> {
     if (isSelfMutation(actor.id, id))
       throw new BadRequestException('You cannot change your own active status');
-    return this.mutate(id, { isActive: dto.isActive });
+    const user = await this.mutate(id, { isActive: dto.isActive });
+    // jwt.strategy already rejects a deactivated account on the next request,
+    // so the access token dies within 15 minutes on its own. The refresh
+    // sessions would not: without this, a deactivated account keeps a valid
+    // seven-day token that quietly becomes usable again the moment anyone
+    // reactivates it.
+    if (!dto.isActive)
+      await this.sessions.update(
+        { userId: id, revokedAt: IsNull() },
+        {
+          revokedAt: new Date(),
+          revokedReason: SessionRevokeReason.ACCOUNT_DISABLED,
+        },
+      );
+    return user;
   }
 
   /**
