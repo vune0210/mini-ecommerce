@@ -461,6 +461,7 @@ DB_PORT=<Railway MySQL port>
 DB_USERNAME=<Railway MySQL user>
 DB_PASSWORD=<Railway MySQL password>
 DB_NAME=<Railway MySQL database>
+DB_SSL=false
 JWT_ACCESS_SECRET=<long random secret>
 JWT_REFRESH_SECRET=<different long random secret>
 FRONTEND_URL=https://<your-vercel-project>.vercel.app

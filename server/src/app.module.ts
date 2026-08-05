@@ -38,6 +38,10 @@ import { WishlistModule } from './wishlist/wishlist.module';
         username: configService.getOrThrow<string>('DB_USERNAME'),
         password: configService.getOrThrow<string>('DB_PASSWORD'),
         database: configService.getOrThrow<string>('DB_NAME'),
+        ssl:
+          configService.get<string>('DB_SSL') === 'true'
+            ? { minVersion: 'TLSv1.2' }
+            : undefined,
         autoLoadEntities: true,
         synchronize: false,
       }),

@@ -42,6 +42,10 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   DB_NAME: string;
 
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  DB_SSL?: string;
+
   @IsString()
   @MinLength(16, {
     message: 'JWT_ACCESS_SECRET must be at least 16 characters',
