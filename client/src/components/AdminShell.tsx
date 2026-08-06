@@ -4,6 +4,8 @@ import {
   MessagesSquare,
   Package,
   Receipt,
+  RotateCcw,
+  ScrollText,
   Tags,
   TicketPercent,
   Users,
@@ -19,6 +21,7 @@ const items = [
   { to: '/admin/inventory', label: 'Kho hàng', icon: Warehouse, end: false },
   { to: '/admin/categories', label: 'Danh mục', icon: Tags, end: false },
   { to: '/admin/orders', label: 'Đơn hàng', icon: Receipt, end: false },
+  { to: '/admin/returns', label: 'Trả hàng', icon: RotateCcw, end: false },
   { to: '/admin/coupons', label: 'Mã giảm giá', icon: TicketPercent, end: false },
   {
     to: '/admin/reviews',
@@ -33,6 +36,7 @@ const items = [
     end: false,
   },
   { to: '/admin/users', label: 'Người dùng', icon: Users, end: false },
+  { to: '/admin/audit-log', label: 'Nhật ký', icon: ScrollText, end: false },
 ];
 
 const itemClass = ({ isActive }: { isActive: boolean }): string =>

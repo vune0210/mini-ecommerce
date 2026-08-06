@@ -12,6 +12,10 @@ import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { CouponType } from '../src/coupons/entities/coupon.entity';
 import { User, UserRole } from '../src/users/entities/user.entity';
+import {
+  Payment,
+  PaymentStatus,
+} from '../src/payments/entities/payment.entity';
 import { resetDatabase } from './utils/db';
 
 type Account = { token: string; refreshToken: string; userId: string };
@@ -193,6 +197,12 @@ describe('Commerce e2e (addresses, wishlist, coupons, inventory, moderation)', (
       expect(order.status).toBe(201);
       expect(order.body.recipientName).toBe('Nguyen Van A');
       expect(order.body.ward).toBe('Ben Nghe');
+      const payment = await dataSource.getRepository(Payment).findOneByOrFail({
+        orderId: order.body.id,
+      });
+      expect(payment.provider).toBe('MANUAL');
+      expect(payment.status).toBe(PaymentStatus.PENDING);
+      expect(payment.amount).toBe(order.body.totalAmount);
 
       // Editing the book afterwards must not rewrite delivery history.
       await api()

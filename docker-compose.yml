@@ -1,39 +1,78 @@
 services:
   mysql:
     image: mysql:8.4
+    command:
+      - --innodb-lock-wait-timeout=10
+      - --innodb-rollback-on-timeout=ON
+      - --max-execution-time=5000
+      - --slow-query-log=ON
+      - --long-query-time=1
+      - --log-output=TABLE
     environment:
       MYSQL_DATABASE: mini_ecommerce
       MYSQL_USER: mini_ecommerce
-      MYSQL_PASSWORD: mini_ecommerce_password
-      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_PASSWORD: ${DEV_DB_PASSWORD:?Set DEV_DB_PASSWORD in the untracked root .env file}
+      MYSQL_ROOT_PASSWORD: ${DEV_DB_ROOT_PASSWORD:?Set DEV_DB_ROOT_PASSWORD in the untracked root .env file}
     ports:
-      - '3306:3306'
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./server/docker/mysql-init/01-runtime-grants.sql:/docker-entrypoint-initdb.d/01-runtime-grants.sql:ro
     healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uroot', '-proot_password']
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot --password=\"$$MYSQL_ROOT_PASSWORD\""]
       interval: 5s
       timeout: 5s
       retries: 20
+    networks: [database]
 
   backend:
+    init: true
     build:
       context: ./server
     environment:
+      NODE_ENV: development
       PORT: 3000
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USERNAME: mini_ecommerce
-      DB_PASSWORD: mini_ecommerce_password
+      DB_PASSWORD: ${DEV_DB_PASSWORD:?Set DEV_DB_PASSWORD in the untracked root .env file}
       DB_NAME: mini_ecommerce
-      JWT_ACCESS_SECRET: local-docker-access-secret-change-me
-      JWT_REFRESH_SECRET: local-docker-refresh-secret-change-me
-      FRONTEND_URL: http://localhost:8081
+      JWT_ACCESS_SECRET: ${DEV_JWT_ACCESS_SECRET:?Set DEV_JWT_ACCESS_SECRET in the untracked root .env file}
+      JWT_REFRESH_SECRET: ${DEV_JWT_REFRESH_SECRET:?Set DEV_JWT_REFRESH_SECRET in the untracked root .env file}
+      FRONTEND_URL: http://localhost:8082
     ports:
-      - '3002:3000'
+      - "3002:3000"
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    stop_grace_period: 30s
+    networks: [application, database]
+
+  release:
+    profiles: ["release"]
+    build:
+      context: ./server
+    environment:
+      NODE_ENV: development
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: ${DEV_DB_MIGRATION_USERNAME:-root}
+      DB_PASSWORD: ${DEV_DB_ROOT_PASSWORD:?Set DEV_DB_ROOT_PASSWORD in the untracked root .env file}
+      DB_NAME: mini_ecommerce
+      JWT_ACCESS_SECRET: ${DEV_JWT_ACCESS_SECRET:?Set DEV_JWT_ACCESS_SECRET in the untracked root .env file}
+      JWT_REFRESH_SECRET: ${DEV_JWT_REFRESH_SECRET:?Set DEV_JWT_REFRESH_SECRET in the untracked root .env file}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["sh", "-c", "npm run migration:run:prod && npm run seed:catalog:prod"]
+    restart: "no"
+    networks: [database]
 
   frontend:
     build:
@@ -41,9 +80,21 @@ services:
       args:
         VITE_API_BASE_URL: /api
     ports:
-      - '8082:80'
+      - "8082:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [application]
 
 volumes:
   mysql_data:
+
+networks:
+  application:
+  database:
+    internal: true

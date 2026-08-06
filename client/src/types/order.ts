@@ -1,5 +1,5 @@
 export type OrderStatus = 'PENDING' | 'PAID' | 'SHIPPED' | 'COMPLETED' | 'CANCELLED';
-export type PaymentMethod = 'COD' | 'BANK_TRANSFER';
+export type PaymentMethod = 'COD' | 'BANK_TRANSFER' | 'STRIPE';
 export type OrderItem = { id: string; productId: string | null; productName: string; unitPrice: string; quantity: number; subtotal: string; createdAt: string; updatedAt: string };
 export type Order = {
   id: string;

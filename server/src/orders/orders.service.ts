@@ -28,6 +28,7 @@ import { StockMovementsService } from '../inventory/stock-movements.service';
 import { NotificationType } from '../notifications/entities/notification.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Product } from '../products/entities/product.entity';
+import { PaymentsService } from '../payments/payments.service';
 import { UserRole } from '../users/entities/user.entity';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -76,6 +77,7 @@ export class OrdersService {
     private readonly coupons: CouponsService,
     private readonly stockMovements: StockMovementsService,
     private readonly notifications: NotificationsService,
+    private readonly payments: PaymentsService,
     configService: ConfigService,
   ) {
     // Read once at construction: a fee that changed between two lines of the
@@ -165,6 +167,7 @@ export class OrdersService {
         ...shipping,
         note: dto.note?.trim() || null,
       });
+      await this.payments.createForOrder(manager, order);
       if (redeemed)
         await this.coupons.recordRedemption(manager, {
           couponId: redeemed.couponId,
@@ -291,7 +294,7 @@ export class OrdersService {
     user: AuthenticatedUser,
     dto: CancelOrderDto,
   ): Promise<Order> {
-    return this.dataSource.transaction(async (manager) => {
+    const order = await this.dataSource.transaction(async (manager) => {
       await this.lockOrder(manager, id);
       const order = await this.orderWithItems(manager, id, true);
       if (order.user.id !== user.id)
@@ -300,6 +303,8 @@ export class OrdersService {
         throw new BadRequestException('Only pending orders can be cancelled');
       return this.cancelOrder(manager, order, user, dto.note);
     });
+    await this.payments.processPendingRefundForOrder(order.id);
+    return order;
   }
 
   async updateStatus(
@@ -307,7 +312,7 @@ export class OrdersService {
     dto: UpdateOrderStatusDto,
     actor: AuthenticatedUser,
   ): Promise<Order> {
-    return this.dataSource.transaction(async (manager) => {
+    const order = await this.dataSource.transaction(async (manager) => {
       await this.lockOrder(manager, id);
       const order = await this.orderWithItems(manager, id, true);
       if (!validOrderTransition(order.status, dto.status))
@@ -323,6 +328,8 @@ export class OrdersService {
       // moment money arrived, not the moment the order last changed.
       if (dto.status === OrderStatus.PAID && !order.paidAt)
         order.paidAt = new Date();
+      if (dto.status === OrderStatus.PAID)
+        await this.payments.markPaid(manager, order.id);
       await manager.getRepository(Order).save(order);
       await this.recordTransition(
         manager,
@@ -341,6 +348,9 @@ export class OrdersService {
       );
       return this.orderWithItems(manager, order.id, true);
     });
+    if (order.status === OrderStatus.CANCELLED)
+      await this.payments.processPendingRefundForOrder(order.id);
+    return order;
   }
 
   /**
@@ -449,6 +459,7 @@ export class OrdersService {
     // The discount budget goes back with the stock. Without this a cancelled
     // order permanently consumes one redemption of a limited coupon.
     await this.coupons.release(manager, order.id);
+    await this.payments.cancelOrQueueRefund(manager, order, actor.id);
     const fromStatus = order.status;
     order.status = OrderStatus.CANCELLED;
     await manager.getRepository(Order).save(order);

@@ -31,6 +31,10 @@ import { ReturnStatusHistory } from '../returns/entities/return-status-history.e
 import { Review } from '../reviews/entities/review.entity';
 import { ReviewVote } from '../reviews/entities/review-vote.entity';
 import { WishlistItem } from '../wishlist/entities/wishlist-item.entity';
+import { Payment } from '../payments/entities/payment.entity';
+import { PaymentRefund } from '../payments/entities/payment-refund.entity';
+import { PaymentWebhookEvent } from '../payments/entities/payment-webhook-event.entity';
+import { databaseConnectionOptions } from '../common/config/database-config';
 
 /**
  * The CLI data source. The running app uses `autoLoadEntities` instead, so this
@@ -40,14 +44,7 @@ import { WishlistItem } from '../wishlist/entities/wishlist-item.entity';
  * list on the day it is written.
  */
 export default new DataSource({
-  type: 'mysql',
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT ?? 3306),
-  username: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  ssl:
-    process.env.DB_SSL === 'true' ? { minVersion: 'TLSv1.2' } : undefined,
+  ...databaseConnectionOptions(process.env),
   entities: [
     User,
     AuthToken,
@@ -80,6 +77,9 @@ export default new DataSource({
     Review,
     ReviewVote,
     WishlistItem,
+    Payment,
+    PaymentRefund,
+    PaymentWebhookEvent,
   ],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,

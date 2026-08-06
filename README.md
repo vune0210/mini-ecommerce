@@ -14,6 +14,15 @@ client/  React 18, Vite, TypeScript, Tailwind CSS
 
 ## 1. Start MySQL
 
+Create local Docker secrets once (the generated root `.env` is ignored and the
+command refuses to overwrite an existing file):
+
+```bash
+cd server
+npm run secrets:generate-local
+cd ..
+```
+
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
@@ -428,6 +437,11 @@ cd client && npm run build && npm run lint
 ```
 
 ## Deployment
+
+Operational hardening, backup/restore, secret rotation and incident procedures
+are documented in [`docs/OPERATIONS.md`](docs/OPERATIONS.md). The gateway-neutral
+payment ledger and adapter contract are documented in
+[`docs/PAYMENTS.md`](docs/PAYMENTS.md).
 
 [![CI](https://github.com/vune0210/minishop/actions/workflows/ci.yml/badge.svg)](https://github.com/vune0210/minishop/actions/workflows/ci.yml)
 

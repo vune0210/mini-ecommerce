@@ -20,3 +20,10 @@ Thumbs.db
 **/.ua/
 .agents/
 target/
+**/backups/
+**/*.sql.partial
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks

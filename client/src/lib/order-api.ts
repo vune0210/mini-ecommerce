@@ -19,7 +19,9 @@ export const ORDER_PAGE_SIZE = 10;
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   COD: 'Thanh toán khi nhận hàng (COD)',
   BANK_TRANSFER: 'Chuyển khoản ngân hàng',
+  STRIPE: 'Thẻ quốc tế qua Stripe',
 };
+export const createStripeSession = (orderId: string) => apiJson<{ redirectUrl: string }>(`/api/payments/orders/${encodeURIComponent(orderId)}/stripe-session`, { method: 'POST' });
 
 /**
  * A saved destination from the customer's address book. Kept here rather than
@@ -58,6 +60,7 @@ export function useOrderHistory(id: string) { const enabled = useLoggedIn(); ret
 export function useAddresses() { const enabled = useLoggedIn(); return useQuery({ queryKey: ADDRESSES_KEY, queryFn: getAddresses, enabled }); }
 function useInvalidateOrders() { const client = useQueryClient(); return () => Promise.all([client.invalidateQueries({ queryKey: ORDERS_KEY }), client.invalidateQueries({ queryKey: CART_KEY }), client.invalidateQueries({ queryKey: ['order-history'] })]); }
 export function useCheckout() { const invalidate = useInvalidateOrders(); return useMutation({ mutationFn: checkout, onSuccess: invalidate }); }
+export function useStripeSession() { return useMutation({ mutationFn: createStripeSession }); }
 export function useCancelOrder() { const invalidate = useInvalidateOrders(); return useMutation({ mutationFn: cancelOrder, onSuccess: invalidate }); }
 export function orderErrorMessage(error: unknown): string { if (!(error instanceof Error)) return 'Không thể xử lý đơn hàng.'; try { const body = JSON.parse(error.message) as { message?: string | string[] }; return Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'Không thể xử lý đơn hàng.'; } catch { return error.message; } }
 /**

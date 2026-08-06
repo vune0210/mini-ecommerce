@@ -33,6 +33,7 @@ import {
   stockConflictItems,
   useAddresses,
   useCheckout,
+  useStripeSession,
 } from '../lib/order-api';
 import { useAuthStore } from '../stores/auth-store';
 import type { CheckoutInput, PaymentMethod } from '../types/order';
@@ -55,7 +56,7 @@ const schema = z
     district: z.string().max(100, 'Quận/Huyện tối đa 100 ký tự.'),
     city: z.string(),
     note: z.string().max(500, 'Ghi chú tối đa 500 ký tự.'),
-    paymentMethod: z.enum(['COD', 'BANK_TRANSFER']),
+    paymentMethod: z.enum(['COD', 'BANK_TRANSFER', 'STRIPE']),
   })
   .superRefine((values, context) => {
     if (values.addressId) return;
@@ -84,6 +85,12 @@ const paymentOptions: Array<{ value: PaymentMethod; label: string; hint: string;
     label: 'Chuyển khoản ngân hàng',
     hint: 'Thông tin chuyển khoản sẽ được gửi sau khi đặt hàng.',
     icon: Landmark,
+  },
+  {
+    value: 'STRIPE',
+    label: 'Thanh toán thẻ qua Stripe',
+    hint: 'Chuyển sang trang Stripe bảo mật để thanh toán. Có thể dùng Test Mode miễn phí.',
+    icon: Wallet,
   },
 ];
 
@@ -118,6 +125,7 @@ export function CheckoutPage() {
   const cartQuery = useCart();
   const addressesQuery = useAddresses();
   const checkout = useCheckout();
+  const stripeSession = useStripeSession();
   const couponPreview = usePreviewCoupon();
   // Only what the shop published and this cart already qualifies for; the
   // server does the filtering, so anything listed here will be accepted.
@@ -198,7 +206,15 @@ export function CheckoutPage() {
             ...(values.district.trim() ? { district: values.district.trim() } : {}),
           }),
     };
-    checkout.mutate(input, { onSuccess: (order) => navigate(`/orders/${order.id}`) });
+    checkout.mutate(input, {
+      onSuccess: (order) => {
+        if (values.paymentMethod !== 'STRIPE') return navigate(`/orders/${order.id}`);
+        stripeSession.mutate(order.id, {
+          onSuccess: ({ redirectUrl }) => window.location.assign(redirectUrl),
+          onError: () => navigate(`/orders/${order.id}`),
+        });
+      },
+    });
   }
 
   return (

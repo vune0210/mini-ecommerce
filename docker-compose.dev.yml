@@ -1,19 +1,27 @@
 services:
   mysql:
     image: mysql:8.4
+    command:
+      - --innodb-lock-wait-timeout=10
+      - --innodb-rollback-on-timeout=ON
+      - --max-execution-time=5000
+      - --slow-query-log=ON
+      - --long-query-time=1
+      - --log-output=TABLE
     container_name: mini-ecommerce-mysql
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: mini_ecommerce
       MYSQL_USER: mini_ecommerce
-      MYSQL_PASSWORD: mini_ecommerce_password
-      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_PASSWORD: ${DEV_DB_PASSWORD:?Set DEV_DB_PASSWORD in the untracked root .env file}
+      MYSQL_ROOT_PASSWORD: ${DEV_DB_ROOT_PASSWORD:?Set DEV_DB_ROOT_PASSWORD in the untracked root .env file}
     ports:
-      - '3306:3306'
+      - '127.0.0.1:3306:3306'
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./server/docker/mysql-init/01-runtime-grants.sql:/docker-entrypoint-initdb.d/01-runtime-grants.sql:ro
     healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uroot', '-proot_password']
+      test: ['CMD-SHELL', 'mysqladmin ping -h localhost -uroot --password="$$MYSQL_ROOT_PASSWORD"']
       interval: 5s
       timeout: 5s
       retries: 20

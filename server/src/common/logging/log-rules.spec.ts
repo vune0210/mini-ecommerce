@@ -1,4 +1,10 @@
-import { REDACTED, redactSecrets, splitNestArgs, toLogLine } from './log-rules';
+import {
+  REDACTED,
+  redactSecrets,
+  redactTextSecrets,
+  splitNestArgs,
+  toLogLine,
+} from './log-rules';
 
 describe('redactSecrets', () => {
   it('masks credential-shaped keys regardless of case', () => {
@@ -28,6 +34,44 @@ describe('redactSecrets', () => {
     expect(redactSecrets('plain')).toBe('plain');
     expect(redactSecrets(7)).toBe(7);
     expect(redactSecrets(null)).toBeNull();
+  });
+
+  it('normalizes separators in sensitive keys', () => {
+    expect(
+      redactSecrets({ DB_PASSWORD: 'db', 'set-cookie': 'session=abc' }),
+    ).toEqual({ DB_PASSWORD: REDACTED, 'set-cookie': REDACTED });
+  });
+});
+
+describe('redactTextSecrets', () => {
+  it('masks bearer tokens, URL passwords and query-string secrets', () => {
+    const value =
+      'Bearer abc.def.ghi mysql://user:pass@host/db token=raw-value';
+    const redacted = redactTextSecrets(value);
+    expect(redacted).not.toContain('abc.def.ghi');
+    expect(redacted).not.toContain(':pass@');
+    expect(redacted).not.toContain('raw-value');
+  });
+
+  it('masks Stripe credentials embedded in free-form provider errors', () => {
+    const value = `key sk_live_${'a'.repeat(32)} signature whsec_${'b'.repeat(32)}`;
+    const redacted = redactTextSecrets(value);
+    expect(redacted).not.toContain('sk_live_');
+    expect(redacted).not.toContain('whsec_');
+  });
+
+  it('masks provider-specific credential keys', () => {
+    expect(
+      redactSecrets({
+        stripe_signature: 'signature',
+        clientSecret: 'oauth',
+        secret_access_key: 'storage',
+      }),
+    ).toEqual({
+      stripe_signature: REDACTED,
+      clientSecret: REDACTED,
+      secret_access_key: REDACTED,
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import { Bell, Heart, LayoutDashboard, LogOut, Menu, Package, Receipt, ShieldCheck, ShoppingBag, ShoppingCart, User, X } from 'lucide-react';
+import { Bell, Heart, LayoutDashboard, LogOut, Menu, Package, Receipt, RotateCcw, ShieldCheck, ShoppingBag, ShoppingCart, User, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { NotificationBell } from './NotificationBell';
@@ -45,6 +45,7 @@ export function AppNav() {
     ? [
         { to: '/products', label: 'Sản phẩm', icon: Package },
         { to: '/orders', label: 'Đơn hàng', icon: Receipt },
+        { to: '/returns', label: 'Trả hàng', icon: RotateCcw },
         { to: '/wishlist', label: 'Yêu thích', icon: Heart },
         { to: '/notifications', label: 'Thông báo', icon: Bell },
         { to: '/account', label: 'Tài khoản', icon: User },

@@ -1,6 +1,7 @@
 import {
   CallHandler,
   ExecutionContext,
+  HttpException,
   Injectable,
   Logger,
   NestInterceptor,
@@ -42,13 +43,15 @@ export class LoggingInterceptor implements NestInterceptor {
         statusCode,
         durationMs: Date.now() - startedAt,
         userId: request.user?.id,
+        clientIp: request.ip,
       });
     };
 
     return next.handle().pipe(
       tap({
         next: () => record(response.statusCode),
-        error: () => record(response.statusCode),
+        error: (error: unknown) =>
+          record(error instanceof HttpException ? error.getStatus() : 500),
       }),
     );
   }

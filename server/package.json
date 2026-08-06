@@ -26,7 +26,13 @@
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts",
     "migration:show": "typeorm-ts-node-commonjs migration:show -d src/database/data-source.ts",
     "seed:admin": "ts-node -r tsconfig-paths/register src/database/seeds/admin.seed.ts",
-    "seed:catalog": "ts-node -r tsconfig-paths/register src/database/seeds/catalog.seed.ts"
+    "seed:catalog": "ts-node -r tsconfig-paths/register src/database/seeds/catalog.seed.ts",
+    "backup:create": "node scripts/db-backup.mjs",
+    "backup:verify": "node scripts/db-verify.mjs",
+    "backup:restore": "node scripts/db-restore.mjs",
+    "backup:drill": "node scripts/db-restore-drill.mjs",
+    "security:scan-secrets": "node scripts/scan-secrets.mjs",
+    "secrets:generate-local": "node scripts/generate-local-secrets.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -41,6 +47,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "dotenv": "^17.4.1",
+    "helmet": "^8.3.0",
     "mysql2": "^3.11.5",
     "nodemailer": "^9.0.4",
     "passport": "^0.7.0",

@@ -24,6 +24,7 @@ export enum PaymentMethod {
   /** Cash on delivery — the default, and the only one needing no gateway. */
   COD = 'COD',
   BANK_TRANSFER = 'BANK_TRANSFER',
+  STRIPE = 'STRIPE',
 }
 
 // Index names match AddOrderShippingDetails so migration:generate does not

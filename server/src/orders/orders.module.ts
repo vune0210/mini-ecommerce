@@ -9,6 +9,7 @@ import { CouponsModule } from '../coupons/coupons.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Product } from '../products/entities/product.entity';
+import { PaymentsModule } from '../payments/payments.module';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { Order } from './entities/order.entity';
@@ -21,6 +22,7 @@ import { OrdersService } from './orders.service';
     IdempotencyModule,
     InventoryModule,
     NotificationsModule,
+    PaymentsModule,
     TypeOrmModule.forFeature([
       Order,
       OrderItem,

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminRoute } from './components/AdminRoute';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AdminCategoriesPage } from './pages/AdminCategoriesPage';
+import { AdminAuditLogPage } from './pages/AdminAuditLogPage';
 import { AdminCouponsPage } from './pages/AdminCouponsPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminInventoryPage } from './pages/AdminInventoryPage';
@@ -10,6 +11,7 @@ import { AdminOrdersPage } from './pages/AdminOrdersPage';
 import { AdminProductsPage } from './pages/AdminProductsPage';
 import { AdminQuestionsPage } from './pages/AdminQuestionsPage';
 import { AdminReviewsPage } from './pages/AdminReviewsPage';
+import { AdminReturnsPage } from './pages/AdminReturnsPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AddressesPage } from './pages/account/AddressesPage';
 import { PasswordPage } from './pages/account/PasswordPage';
@@ -29,6 +31,9 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { ProductListPage } from './pages/ProductListPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { ReturnDetailPage } from './pages/ReturnDetailPage';
+import { ReturnRequestPage } from './pages/ReturnRequestPage';
+import { ReturnsPage } from './pages/ReturnsPage';
 import { WishlistPage } from './pages/WishlistPage';
 
 export default function App() {
@@ -53,6 +58,9 @@ export default function App() {
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/orders" element={<OrderHistoryPage />} />
         <Route path="/orders/:id" element={<OrderDetailPage />} />
+        <Route path="/returns" element={<ReturnsPage />} />
+        <Route path="/returns/new" element={<ReturnRequestPage />} />
+        <Route path="/returns/:id" element={<ReturnDetailPage />} />
         {/* The account shell has no index page of its own; profile is the
             landing tab, so /account redirects rather than rendering blank. */}
         <Route
@@ -74,6 +82,8 @@ export default function App() {
         <Route path="/admin/coupons" element={<AdminCouponsPage />} />
         <Route path="/admin/reviews" element={<AdminReviewsPage />} />
         <Route path="/admin/questions" element={<AdminQuestionsPage />} />
+        <Route path="/admin/returns" element={<AdminReturnsPage />} />
+        <Route path="/admin/audit-log" element={<AdminAuditLogPage />} />
         <Route path="/admin/users" element={<AdminUsersPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/products" replace />} />

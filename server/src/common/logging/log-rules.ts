@@ -15,7 +15,19 @@ const SENSITIVE_KEYS = [
   'token',
   'authorization',
   'cookie',
+  'setcookie',
   'secret',
+  'dbpassword',
+  'smtppassword',
+  'adminpassword',
+  'apikey',
+  'clientsecret',
+  'webhooksecret',
+  'stripekey',
+  'stripesignature',
+  'accesskey',
+  'secretaccesskey',
+  'xapikey',
 ];
 
 const MAX_DEPTH = 4;
@@ -29,15 +41,33 @@ export function redactSecrets(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return '[truncated]';
   if (Array.isArray(value))
     return value.map((item) => redactSecrets(item, depth + 1));
+  if (typeof value === 'string') return redactTextSecrets(value);
   if (value === null || typeof value !== 'object') return value;
 
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    result[key] = SENSITIVE_KEYS.includes(key.toLowerCase())
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    result[key] = SENSITIVE_KEYS.includes(normalizedKey)
       ? REDACTED
       : redactSecrets(item, depth + 1);
   }
   return result;
+}
+
+/** Redacts credentials embedded in exception messages and connection URLs. */
+export function redactTextSecrets(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    .replace(
+      /\b([A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s/@]+):[^@\s/]+@/g,
+      '$1:[redacted]@',
+    )
+    .replace(
+      /\b(password|token|secret|api[_-]?key|client[_-]?secret|webhook[_-]?secret|access[_-]?key)=([^\s&]+)/gi,
+      '$1=[redacted]',
+    )
+    .replace(/\b(?:sk|rk)_(?:test|live)_[A-Za-z0-9]+\b/g, '[redacted-stripe-key]')
+    .replace(/\bwhsec_[A-Za-z0-9]+\b/g, '[redacted-webhook-secret]');
 }
 
 /**
