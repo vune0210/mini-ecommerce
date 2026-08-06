@@ -54,7 +54,7 @@ export class AccountRecoveryController {
   @RateLimit({ limit: 5, windowMs: 15 * MINUTE })
   @ApiAcceptedResponse({
     description:
-      'Always 202 with the same body, whether or not the address is registered — a different answer would be an account-existence oracle. With no mail transport configured the token is logged server-side outside production; it is never returned here.',
+      'Always 202 with the same body, whether or not the address is registered — a different answer would be an account-existence oracle. When SMTP is configured, a single-use reset link is sent by email.',
   })
   async forgotPassword(
     @Body() dto: ForgotPasswordDto,
@@ -90,7 +90,7 @@ export class AccountRecoveryController {
   @ApiBearerAuth()
   @ApiAcceptedResponse({
     description:
-      'Mints a 24-hour verification token for the caller. Returns alreadyVerified: true and mints nothing when the address is already proven. Outside production the token is echoed as devToken because there is no mail transport; in production it is never returned.',
+      'Mints a 24-hour verification token for the caller and sends it through configured SMTP. Returns alreadyVerified: true and mints nothing when the address is already proven. Outside production without SMTP, the token is echoed as devToken; in production it is never returned.',
   })
   requestEmailVerification(
     @Request() request: { user: AuthenticatedUser },

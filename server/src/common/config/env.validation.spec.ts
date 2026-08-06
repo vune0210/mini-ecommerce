@@ -65,4 +65,25 @@ describe('validateEnv', () => {
       /NODE_ENV/,
     );
   });
+
+  it('accepts a complete SMTP configuration', () => {
+    expect(() =>
+      validateEnv({
+        ...valid,
+        FRONTEND_URL: 'https://shop.example.com',
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: '587',
+        SMTP_SECURE: 'false',
+        SMTP_USER: 'mailer',
+        SMTP_PASSWORD: 'secret',
+        SMTP_FROM: 'MiniShop <no-reply@example.com>',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects a partial SMTP configuration', () => {
+    expect(() =>
+      validateEnv({ ...valid, SMTP_HOST: 'smtp.example.com' }),
+    ).toThrow(/SMTP_PORT.*SMTP_USER.*SMTP_PASSWORD.*SMTP_FROM.*FRONTEND_URL/);
+  });
 });

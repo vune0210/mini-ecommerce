@@ -17,6 +17,7 @@ import {
   redactDelivery,
 } from './token-rules';
 import { User } from '../users/entities/user.entity';
+import { SmtpMailService } from './smtp-mail.service';
 
 /**
  * 256 bits from the CSPRNG, base64url so it survives a query string untouched.
@@ -36,10 +37,8 @@ export type VerificationRequestResult = DevTokenHint & {
 /**
  * Password reset and email verification.
  *
- * There is no SMTP transport in this project. Rather than pretend otherwise,
- * every mint builds the exact payload a transport would receive and hands it to
- * `deliver`, which logs it in development and reduces it to an audit line in
- * production. Wiring a real mailer later means replacing one private method.
+ * Delivery uses SMTP when configured. Development keeps returning the token so
+ * the flow remains testable without external infrastructure.
  */
 @Injectable()
 export class AuthTokensService {
@@ -51,6 +50,7 @@ export class AuthTokensService {
     private readonly tokens: Repository<AuthToken>,
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    private readonly mail: SmtpMailService,
   ) {}
 
   /**
@@ -148,7 +148,7 @@ export class AuthTokensService {
 
   /**
    * Issues one token and voids the account's outstanding ones for the same
-   * purpose. Returns the secret only outside production.
+   * purpose. Returns the secret only outside production when SMTP is absent.
    *
    * Superseding comes first, and deliberately: when a customer asks for a
    * second reset email it is usually because the first never arrived or went
@@ -212,29 +212,39 @@ export class AuthTokensService {
   }
 
   /**
-   * Stands in for the mail transport this project does not have.
-   *
-   * In production the secret is neither logged nor returned. A log aggregator is
-   * a second store, readable by far more people than the database, and a token
-   * sitting in it is as good as the account — the whole reason only the SHA-256
-   * reaches the table. What is left is an audit line proving a token was minted.
+   * Sends through SMTP when configured. In production the secret is neither
+   * logged nor returned. A log aggregator is a second store, readable by far
+   * more people than the database, and a token sitting in it is as good as the
+   * account — the whole reason only the SHA-256 reaches the table.
    *
    * Outside production the full payload is logged and the secret handed back, so
    * the flow is exercisable without SMTP. Gated on NODE_ENV rather than on a new
    * variable so there is no switch anyone can accidentally set in a deployment.
    */
-  private deliver(
+  private async deliver(
     user: User,
     purpose: AuthTokenPurpose,
     secret: string,
     expiresAt: Date,
     now: Date,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     const delivery = buildDelivery(user.email, purpose, secret, expiresAt, now);
+    if (this.mail.isConfigured()) {
+      try {
+        await this.mail.sendAuthToken(delivery);
+      } catch (error) {
+        this.logger.error({
+          message: 'Authentication email delivery failed',
+          userId: user.id,
+          error: error instanceof Error ? error.message : 'Unknown SMTP error',
+          ...redactDelivery(delivery),
+        });
+      }
+      return undefined;
+    }
     if (this.isProduction()) {
       this.logger.warn({
-        message:
-          'Auth token minted but no mail transport is configured; it cannot be delivered',
+        message: 'Auth token minted but SMTP is not configured',
         userId: user.id,
         ...redactDelivery(delivery),
       });

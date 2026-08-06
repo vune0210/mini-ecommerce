@@ -14,6 +14,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { AuthToken } from './entities/auth-token.entity';
 import { RefreshSession } from './entities/refresh-session.entity';
 import { User } from '../users/entities/user.entity';
+import { SmtpMailService } from './smtp-mail.service';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { User } from '../users/entities/user.entity';
   providers: [
     AuthService,
     AuthTokensService,
+    SmtpMailService,
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,

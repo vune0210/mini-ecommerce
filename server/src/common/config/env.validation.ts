@@ -46,6 +46,34 @@ export class EnvironmentVariables {
   @IsIn(['true', 'false'])
   DB_SSL?: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  SMTP_HOST?: string;
+
+  @IsOptional()
+  @IsNumberString({}, { message: 'SMTP_PORT must be numeric' })
+  SMTP_PORT?: string;
+
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  SMTP_SECURE?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  SMTP_USER?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  SMTP_PASSWORD?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  SMTP_FROM?: string;
+
   @IsString()
   @MinLength(16, {
     message: 'JWT_ACCESS_SECRET must be at least 16 characters',
@@ -100,12 +128,31 @@ export function validateEnv(
 ): Record<string, unknown> {
   const parsed = plainToInstance(EnvironmentVariables, config);
   const errors = validateSync(parsed, { skipMissingProperties: false });
-  if (errors.length === 0) return config;
+  if (errors.length > 0) {
+    // One throw listing everything, so a fresh clone is fixed in a single pass.
+    const details = errors
+      .map((error) => Object.values(error.constraints ?? {}).join('; '))
+      .filter(Boolean)
+      .join('\n  - ');
+    throw new Error(`Invalid environment configuration:\n  - ${details}`);
+  }
 
-  // One throw listing everything, so a fresh clone is fixed in a single pass.
-  const details = errors
-    .map((error) => Object.values(error.constraints ?? {}).join('; '))
-    .filter(Boolean)
-    .join('\n  - ');
-  throw new Error(`Invalid environment configuration:\n  - ${details}`);
+  const smtpKeys = [
+    'SMTP_HOST',
+    'SMTP_PORT',
+    'SMTP_USER',
+    'SMTP_PASSWORD',
+    'SMTP_FROM',
+  ] as const;
+  const smtpConfigured = smtpKeys.some((key) => Boolean(config[key]));
+  if (smtpConfigured) {
+    const missing: string[] = smtpKeys.filter((key) => !config[key]);
+    if (!config.FRONTEND_URL) missing.push('FRONTEND_URL');
+    if (missing.length > 0) {
+      throw new Error(
+        `Invalid SMTP configuration: missing ${missing.join(', ')}`,
+      );
+    }
+  }
+  return config;
 }

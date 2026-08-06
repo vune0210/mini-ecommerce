@@ -77,13 +77,16 @@ Swagger UI is available at `http://localhost:3000/api/docs`.
 - `POST /api/auth/refresh` exchanges a refresh token for an access token.
 - `GET /api/auth/me` requires an access token.
 
-Create the development admin account with:
+Create an admin account with explicit credentials:
 
-```bash
+```powershell
+$env:ADMIN_EMAIL='owner@example.com'
+$env:ADMIN_PASSWORD='<strong-password-at-least-12-characters>'
 npm run seed:admin
 ```
 
-Credentials: `admin@mini-ecommerce.local` / `Admin123!`.
+The seed creates nothing when these variables are absent. There is no default
+admin email or password.
 
 ## Quality commands
 

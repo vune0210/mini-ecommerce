@@ -41,14 +41,18 @@ The health endpoint is `http://localhost:3000/api/health`; Swagger is at `http:/
 
 The server requires `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET`; local values are included in `server/.env.example` and must be replaced outside development.
 
-Create the local ADMIN test account after migrations:
+Create an ADMIN account after migrations by setting explicit credentials:
 
 ```bash
 cd server
+$env:ADMIN_EMAIL='owner@example.com'
+$env:ADMIN_PASSWORD='<strong-password-at-least-12-characters>'
 npm run seed:admin
 ```
 
-The development credentials are `admin@mini-ecommerce.local` / `Admin123!`.
+On macOS/Linux, prefix the command with the same variables. With no
+`ADMIN_EMAIL` and `ADMIN_PASSWORD`, the seed exits without creating an account;
+there is no default public credential.
 
 `npm run seed:catalog` fills a demo catalogue (with SKUs and one nested category) and two demo discount codes, `WELCOME10` and `FREESHIP50K`, so the coupon flow is exercisable straight away. The seed is idempotent: an existing code is left exactly as an admin last edited it.
 
@@ -65,13 +69,13 @@ npm run dev
 
 Open the URL reported by Vite (normally `http://localhost:5173`). The root path redirects to the product catalogue at `/products`; the server health check moved to `/health` and is linked from the footer. Set `VITE_API_BASE_URL` in `client/.env` if the API uses another host or port.
 
-| Area | Routes |
-| --- | --- |
-| Public | `/products`, `/products/:id`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/verify-email`, `/health` |
-| Customer | `/cart`, `/checkout`, `/orders`, `/orders/:id`, `/wishlist`, `/notifications`, `/account/{profile,password,sessions,addresses}`, `/dashboard` |
-| Admin | `/admin`, `/admin/products`, `/admin/inventory`, `/admin/categories`, `/admin/orders`, `/admin/orders/:id`, `/admin/coupons`, `/admin/reviews`, `/admin/questions`, `/admin/users` |
+| Area     | Routes                                                                                                                                                                             |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public   | `/products`, `/products/:id`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/verify-email`, `/health`                                                             |
+| Customer | `/cart`, `/checkout`, `/orders`, `/orders/:id`, `/wishlist`, `/notifications`, `/account/{profile,password,sessions,addresses}`, `/dashboard`                                      |
+| Admin    | `/admin`, `/admin/products`, `/admin/inventory`, `/admin/categories`, `/admin/orders`, `/admin/orders/:id`, `/admin/coupons`, `/admin/reviews`, `/admin/questions`, `/admin/users` |
 
-The SPA stores both halves of the token pair and replaces them on every refresh, because the API rotates refresh tokens — see *Sessions and refresh-token rotation*. Concurrent 401s share one in-flight refresh so two tabs never present the same token and trip the replay guard.
+The SPA stores both halves of the token pair and replaces them on every refresh, because the API rotates refresh tokens — see _Sessions and refresh-token rotation_. Concurrent 401s share one in-flight refresh so two tabs never present the same token and trip the replay guard.
 
 ## API surface
 
@@ -79,112 +83,112 @@ All routes are served under the `/api` prefix and documented in Swagger at `/api
 
 ### Authentication and sessions
 
-| Method | Path | Access | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/api/auth/register` | public | Create a CUSTOMER account |
-| `POST` | `/api/auth/login` | public | Access token (15 min) + rotating refresh token (7 days) |
-| `POST` | `/api/auth/refresh` | public | Rotate the session; returns a **new pair** |
-| `GET` | `/api/auth/me` | JWT | Current user |
-| `PATCH` | `/api/auth/profile` | JWT | Change the display name |
-| `PATCH` | `/api/auth/password` | JWT | Change password, revoke all sessions, return a fresh pair |
-| `POST` | `/api/auth/logout` | JWT | Revoke the named refresh token, or the caller's own session |
-| `POST` | `/api/auth/logout-all` | JWT | Revoke every session of the caller |
-| `GET` | `/api/auth/sessions` | JWT | Live sessions, with `current: true` on the one in use |
-| `DELETE` | `/api/auth/sessions/:id` | JWT | End one session |
-| `POST` | `/api/auth/forgot-password` | public | Always 202 with the same body — see below |
-| `POST` | `/api/auth/reset-password` | public | Consume the token, set the password, revoke every session |
-| `POST` | `/api/auth/verify-email/request` | JWT | Mint a 24-hour verification token |
-| `POST` | `/api/auth/verify-email/confirm` | public | Consume it and stamp `email_verified_at` |
+| Method   | Path                             | Access | Purpose                                                     |
+| -------- | -------------------------------- | ------ | ----------------------------------------------------------- |
+| `POST`   | `/api/auth/register`             | public | Create a CUSTOMER account                                   |
+| `POST`   | `/api/auth/login`                | public | Access token (15 min) + rotating refresh token (7 days)     |
+| `POST`   | `/api/auth/refresh`              | public | Rotate the session; returns a **new pair**                  |
+| `GET`    | `/api/auth/me`                   | JWT    | Current user                                                |
+| `PATCH`  | `/api/auth/profile`              | JWT    | Change the display name                                     |
+| `PATCH`  | `/api/auth/password`             | JWT    | Change password, revoke all sessions, return a fresh pair   |
+| `POST`   | `/api/auth/logout`               | JWT    | Revoke the named refresh token, or the caller's own session |
+| `POST`   | `/api/auth/logout-all`           | JWT    | Revoke every session of the caller                          |
+| `GET`    | `/api/auth/sessions`             | JWT    | Live sessions, with `current: true` on the one in use       |
+| `DELETE` | `/api/auth/sessions/:id`         | JWT    | End one session                                             |
+| `POST`   | `/api/auth/forgot-password`      | public | Always 202 with the same body — see below                   |
+| `POST`   | `/api/auth/reset-password`       | public | Consume the token, set the password, revoke every session   |
+| `POST`   | `/api/auth/verify-email/request` | JWT    | Mint a 24-hour verification token                           |
+| `POST`   | `/api/auth/verify-email/confirm` | public | Consume it and stamp `email_verified_at`                    |
 
 ### Catalogue
 
-| Method | Path | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/api/categories` | public | Flat list, each row carrying `productCount` |
-| `GET` | `/api/categories/tree` | public | The same categories nested by `parentId` |
-| `GET` | `/api/categories/:id` | public | One category |
-| `POST`/`PATCH`/`DELETE` | `/api/categories[/:id]` | ADMIN | Category CRUD, `parentId` supported |
-| `GET` | `/api/products` | public | Published products; filters below |
-| `GET` | `/api/products/:id` | public | Product with `averageRating` and `reviewCount` |
-| `GET` | `/api/products/slug/:slug` | public | Look a product up by its URL slug |
-| `GET` | `/api/products/:id/related` | public | In-stock siblings from the same category, best rated first |
-| `GET` | `/api/products/:id/images` | public | The gallery |
-| `POST`/`PATCH`/`DELETE` | `/api/products/:id/images[/:imageId]` | ADMIN | Gallery CRUD |
-| `PUT` | `/api/products/:id/images/order` | ADMIN | Reorder in one call |
-| `GET` | `/api/tags` | public | Tags with published-product counts |
-| `POST`/`PATCH`/`DELETE` | `/api/tags[/:id]` | ADMIN | Tag CRUD |
-| `PUT` | `/api/products/:id/tags` | ADMIN | Replace a product's tag set |
-| `POST`/`PATCH`/`DELETE` | `/api/products[/:id]` | ADMIN | Product CRUD |
-| `PATCH` | `/api/products/:id/stock` | ADMIN | Absolute stock set that writes a ledger entry |
-| `GET` | `/api/products/suggest` | public | Typeahead, `?q=` 2-64 chars, max 8 results |
-| `GET` | `/api/admin/products[/:id]` | ADMIN | Catalogue including unpublished products |
-| `PATCH` | `/api/admin/products/bulk/{visibility,category,price}` | ADMIN | Act on up to 200 products at once |
+| Method                  | Path                                                   | Access | Purpose                                                    |
+| ----------------------- | ------------------------------------------------------ | ------ | ---------------------------------------------------------- |
+| `GET`                   | `/api/categories`                                      | public | Flat list, each row carrying `productCount`                |
+| `GET`                   | `/api/categories/tree`                                 | public | The same categories nested by `parentId`                   |
+| `GET`                   | `/api/categories/:id`                                  | public | One category                                               |
+| `POST`/`PATCH`/`DELETE` | `/api/categories[/:id]`                                | ADMIN  | Category CRUD, `parentId` supported                        |
+| `GET`                   | `/api/products`                                        | public | Published products; filters below                          |
+| `GET`                   | `/api/products/:id`                                    | public | Product with `averageRating` and `reviewCount`             |
+| `GET`                   | `/api/products/slug/:slug`                             | public | Look a product up by its URL slug                          |
+| `GET`                   | `/api/products/:id/related`                            | public | In-stock siblings from the same category, best rated first |
+| `GET`                   | `/api/products/:id/images`                             | public | The gallery                                                |
+| `POST`/`PATCH`/`DELETE` | `/api/products/:id/images[/:imageId]`                  | ADMIN  | Gallery CRUD                                               |
+| `PUT`                   | `/api/products/:id/images/order`                       | ADMIN  | Reorder in one call                                        |
+| `GET`                   | `/api/tags`                                            | public | Tags with published-product counts                         |
+| `POST`/`PATCH`/`DELETE` | `/api/tags[/:id]`                                      | ADMIN  | Tag CRUD                                                   |
+| `PUT`                   | `/api/products/:id/tags`                               | ADMIN  | Replace a product's tag set                                |
+| `POST`/`PATCH`/`DELETE` | `/api/products[/:id]`                                  | ADMIN  | Product CRUD                                               |
+| `PATCH`                 | `/api/products/:id/stock`                              | ADMIN  | Absolute stock set that writes a ledger entry              |
+| `GET`                   | `/api/products/suggest`                                | public | Typeahead, `?q=` 2-64 chars, max 8 results                 |
+| `GET`                   | `/api/admin/products[/:id]`                            | ADMIN  | Catalogue including unpublished products                   |
+| `PATCH`                 | `/api/admin/products/bulk/{visibility,category,price}` | ADMIN  | Act on up to 200 products at once                          |
 
 ### Shopping
 
-| Method | Path | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/cart`, `/api/cart/items[/:itemId]` | JWT | Cart management |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/addresses[/:id]` | JWT | Saved delivery destinations |
-| `PATCH` | `/api/addresses/:id/default` | JWT | Promote one address to default |
-| `GET`/`POST`/`DELETE` | `/api/wishlist[/:productId]` | JWT | Saved products |
-| `POST` | `/api/wishlist/:productId/move-to-cart` | JWT | Add to cart and unsave |
-| `POST` | `/api/coupons/preview` | JWT | Validate a code against the caller's cart |
-| `GET` | `/api/coupons/available` | JWT | Published codes this cart qualifies for, best first |
-| `GET` | `/api/me/overview` | JWT | Everything the account landing page needs, in one request |
-| `GET` | `/api/stock-alerts` | JWT | Sold-out products the caller is waiting on |
-| `POST`/`DELETE` | `/api/products/:id/stock-alert` | JWT | Watch / unwatch a sold-out product |
-| `GET` | `/api/notifications` | JWT | Inbox, paginated, `unreadOnly` and `type` filters |
-| `GET` | `/api/notifications/unread-count` | JWT | Cheap badge count |
-| `PATCH` | `/api/notifications/:id/read` | JWT | Idempotent; keeps the first `readAt` |
-| `POST` | `/api/notifications/read-all` | JWT | Clear the badge |
-| `DELETE` | `/api/notifications/:id` | JWT | Remove one |
-| `GET`/`PATCH` | `/api/notifications/preferences` | JWT | Per-category mute switches |
-| `GET`/`POST` | `/api/products/:id/questions` | public / JWT | Ask and read |
-| `PATCH`/`DELETE` | `/api/questions/:id` | JWT | Author edits; author or ADMIN deletes |
-| `POST` | `/api/questions/:id/answers` | JWT | Answer; `isOfficial` derived from the role |
-| `PATCH`/`DELETE` | `/api/answers/:id` | JWT | Author edits; author or ADMIN deletes |
-| `POST`/`DELETE` | `/api/answers/:id/helpful` | JWT | Idempotent vote, never on your own |
-| `POST` | `/api/returns` | JWT | File a return against a COMPLETED order |
-| `GET` | `/api/returns[/:id]` | JWT | Own requests; detail is owner or ADMIN |
-| `GET` | `/api/returns/:id/history` | JWT | Status timeline, actor redacted for owners |
-| `PATCH` | `/api/returns/:id/cancel` | JWT | Owner, only while REQUESTED |
-| `POST` | `/api/orders/checkout` | JWT | Returns the new order |
-| `GET` | `/api/orders` | JWT | Own orders, paginated, `status` filter |
-| `GET` | `/api/orders/:id` | JWT | Owner or ADMIN |
-| `GET` | `/api/orders/:id/history` | JWT | Status timeline, owner or ADMIN |
-| `PATCH` | `/api/orders/:id/cancel` | JWT | Owner, PENDING orders only |
+| Method                        | Path                                     | Access       | Purpose                                                   |
+| ----------------------------- | ---------------------------------------- | ------------ | --------------------------------------------------------- |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/api/cart`, `/api/cart/items[/:itemId]` | JWT          | Cart management                                           |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/api/addresses[/:id]`                   | JWT          | Saved delivery destinations                               |
+| `PATCH`                       | `/api/addresses/:id/default`             | JWT          | Promote one address to default                            |
+| `GET`/`POST`/`DELETE`         | `/api/wishlist[/:productId]`             | JWT          | Saved products                                            |
+| `POST`                        | `/api/wishlist/:productId/move-to-cart`  | JWT          | Add to cart and unsave                                    |
+| `POST`                        | `/api/coupons/preview`                   | JWT          | Validate a code against the caller's cart                 |
+| `GET`                         | `/api/coupons/available`                 | JWT          | Published codes this cart qualifies for, best first       |
+| `GET`                         | `/api/me/overview`                       | JWT          | Everything the account landing page needs, in one request |
+| `GET`                         | `/api/stock-alerts`                      | JWT          | Sold-out products the caller is waiting on                |
+| `POST`/`DELETE`               | `/api/products/:id/stock-alert`          | JWT          | Watch / unwatch a sold-out product                        |
+| `GET`                         | `/api/notifications`                     | JWT          | Inbox, paginated, `unreadOnly` and `type` filters         |
+| `GET`                         | `/api/notifications/unread-count`        | JWT          | Cheap badge count                                         |
+| `PATCH`                       | `/api/notifications/:id/read`            | JWT          | Idempotent; keeps the first `readAt`                      |
+| `POST`                        | `/api/notifications/read-all`            | JWT          | Clear the badge                                           |
+| `DELETE`                      | `/api/notifications/:id`                 | JWT          | Remove one                                                |
+| `GET`/`PATCH`                 | `/api/notifications/preferences`         | JWT          | Per-category mute switches                                |
+| `GET`/`POST`                  | `/api/products/:id/questions`            | public / JWT | Ask and read                                              |
+| `PATCH`/`DELETE`              | `/api/questions/:id`                     | JWT          | Author edits; author or ADMIN deletes                     |
+| `POST`                        | `/api/questions/:id/answers`             | JWT          | Answer; `isOfficial` derived from the role                |
+| `PATCH`/`DELETE`              | `/api/answers/:id`                       | JWT          | Author edits; author or ADMIN deletes                     |
+| `POST`/`DELETE`               | `/api/answers/:id/helpful`               | JWT          | Idempotent vote, never on your own                        |
+| `POST`                        | `/api/returns`                           | JWT          | File a return against a COMPLETED order                   |
+| `GET`                         | `/api/returns[/:id]`                     | JWT          | Own requests; detail is owner or ADMIN                    |
+| `GET`                         | `/api/returns/:id/history`               | JWT          | Status timeline, actor redacted for owners                |
+| `PATCH`                       | `/api/returns/:id/cancel`                | JWT          | Owner, only while REQUESTED                               |
+| `POST`                        | `/api/orders/checkout`                   | JWT          | Returns the new order                                     |
+| `GET`                         | `/api/orders`                            | JWT          | Own orders, paginated, `status` filter                    |
+| `GET`                         | `/api/orders/:id`                        | JWT          | Owner or ADMIN                                            |
+| `GET`                         | `/api/orders/:id/history`                | JWT          | Status timeline, owner or ADMIN                           |
+| `PATCH`                       | `/api/orders/:id/cancel`                 | JWT          | Owner, PENDING orders only                                |
 
 ### Reviews
 
-| Method | Path | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/api/products/:id/reviews` | public | Visible reviews plus a rating summary |
-| `GET` | `/api/products/:id/reviews/mine` | JWT | The caller's own review, `isHidden` included |
-| `POST` | `/api/products/:id/reviews` | JWT | One review per customer per product |
-| `PATCH`/`DELETE` | `/api/reviews/:id` | JWT | Author edits; author or ADMIN deletes |
-| `POST`/`DELETE` | `/api/reviews/:id/helpful` | JWT | Cast or withdraw a helpful vote |
-| `PATCH` | `/api/reviews/:id/visibility` | ADMIN | Hide or restore a review |
-| `GET` | `/api/admin/reviews` | ADMIN | Moderation queue, hidden reviews included |
+| Method           | Path                             | Access | Purpose                                      |
+| ---------------- | -------------------------------- | ------ | -------------------------------------------- |
+| `GET`            | `/api/products/:id/reviews`      | public | Visible reviews plus a rating summary        |
+| `GET`            | `/api/products/:id/reviews/mine` | JWT    | The caller's own review, `isHidden` included |
+| `POST`           | `/api/products/:id/reviews`      | JWT    | One review per customer per product          |
+| `PATCH`/`DELETE` | `/api/reviews/:id`               | JWT    | Author edits; author or ADMIN deletes        |
+| `POST`/`DELETE`  | `/api/reviews/:id/helpful`       | JWT    | Cast or withdraw a helpful vote              |
+| `PATCH`          | `/api/reviews/:id/visibility`    | ADMIN  | Hide or restore a review                     |
+| `GET`            | `/api/admin/reviews`             | ADMIN  | Moderation queue, hidden reviews included    |
 
 ### Administration
 
-| Method | Path | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/api/orders/admin/all` | ADMIN | All orders, `status` and `search` filters |
-| `PATCH` | `/api/orders/:id/status` | ADMIN | Lifecycle transition |
-| `GET` | `/api/admin/users` | ADMIN | Paginated accounts, `search`/`role`/`isActive` |
-| `PATCH` | `/api/admin/users/:id/role`, `/status` | ADMIN | Change role or deactivate |
-| `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/coupons[/:id]` | ADMIN | Coupon CRUD with usage counters |
-| `GET` | `/api/admin/stock-movements` | ADMIN | Stock ledger, `productId`/`reason`/`from`/`to` |
-| `GET` | `/api/admin/questions` | ADMIN | Q&A moderation queue, hidden rows included |
-| `PATCH` | `/api/questions/:id/visibility`, `/api/answers/:id/visibility` | ADMIN | Hide or restore |
-| `GET` | `/api/admin/returns` | ADMIN | Return queue, `status` + `search` |
-| `PATCH` | `/api/admin/returns/:id/status` | ADMIN | Lifecycle transition |
-| `GET` | `/api/admin/audit-log` | ADMIN | Who did what, `actorUserId`/`action`/`resourceType`/`from`/`to` |
-| `GET` | `/api/admin/audit-log/actions` | ADMIN | Distinct action strings, for populating a filter |
-| `GET` | `/api/admin/stats` | ADMIN | Revenue, customers, best sellers, category split, coupon spend |
-| `GET` | `/api/admin/exports/{orders,products,customers}.csv` | ADMIN | Streamed CSV downloads |
+| Method                        | Path                                                           | Access | Purpose                                                         |
+| ----------------------------- | -------------------------------------------------------------- | ------ | --------------------------------------------------------------- |
+| `GET`                         | `/api/orders/admin/all`                                        | ADMIN  | All orders, `status` and `search` filters                       |
+| `PATCH`                       | `/api/orders/:id/status`                                       | ADMIN  | Lifecycle transition                                            |
+| `GET`                         | `/api/admin/users`                                             | ADMIN  | Paginated accounts, `search`/`role`/`isActive`                  |
+| `PATCH`                       | `/api/admin/users/:id/role`, `/status`                         | ADMIN  | Change role or deactivate                                       |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/api/admin/coupons[/:id]`                                     | ADMIN  | Coupon CRUD with usage counters                                 |
+| `GET`                         | `/api/admin/stock-movements`                                   | ADMIN  | Stock ledger, `productId`/`reason`/`from`/`to`                  |
+| `GET`                         | `/api/admin/questions`                                         | ADMIN  | Q&A moderation queue, hidden rows included                      |
+| `PATCH`                       | `/api/questions/:id/visibility`, `/api/answers/:id/visibility` | ADMIN  | Hide or restore                                                 |
+| `GET`                         | `/api/admin/returns`                                           | ADMIN  | Return queue, `status` + `search`                               |
+| `PATCH`                       | `/api/admin/returns/:id/status`                                | ADMIN  | Lifecycle transition                                            |
+| `GET`                         | `/api/admin/audit-log`                                         | ADMIN  | Who did what, `actorUserId`/`action`/`resourceType`/`from`/`to` |
+| `GET`                         | `/api/admin/audit-log/actions`                                 | ADMIN  | Distinct action strings, for populating a filter                |
+| `GET`                         | `/api/admin/stats`                                             | ADMIN  | Revenue, customers, best sellers, category split, coupon spend  |
+| `GET`                         | `/api/admin/exports/{orders,products,customers}.csv`           | ADMIN  | Streamed CSV downloads                                          |
 
 ### Product listing
 
@@ -197,7 +201,7 @@ Categories nest through `parentId`. `GET /api/categories/tree` returns the neste
 ### Search suggestions
 
 `GET /api/products/suggest?q=` powers the storefront typeahead. It matches name
-or SKU across published products only, and ranks a name *starting* with the term
+or SKU across published products only, and ranks a name _starting_ with the term
 above one merely containing it — typing "tai" should surface "Tai nghe" before
 "Bàn phím tai thỏ", which a plain `LIKE` cannot express. It returns a narrow
 projection (id, name, slug, price, image, stock), because shipping eight full
@@ -215,7 +219,7 @@ Every response reports `updated` **and** `skipped[]` with a reason per id.
 Partial success is never hidden: "updated: 47" alone leaves an admin believing
 the catalogue is in a state it is not. Price adjustment (`PERCENT`, `AMOUNT` or
 `SET`, negatives discount) computes each product's new price from its own
-current price and *refuses* a result outside `decimal(10,2)` rather than
+current price and _refuses_ a result outside `decimal(10,2)` rather than
 clamping — a "-99%" typo across a catalogue would otherwise set hundreds of
 products to one cent and report complete success. One out-of-range product
 skips itself; it does not abort the run.
@@ -276,12 +280,11 @@ Every stock change appends to `stock_movements` with a signed `delta`, the resul
 
 ### Password reset and email verification
 
-There is no SMTP transport in this project, and none was invented. Every mint
-builds the payload a mail transport would receive and hands it to one private
-`deliver` method — the single seam to replace when a mailer arrives. Outside
-production that payload is logged; in production only a masked audit line is,
-because a log aggregator is a second store readable by more people than the
-database, which is the whole reason only the SHA-256 of a token is persisted.
+When the complete `SMTP_*` group is configured, Nodemailer sends reset and
+verification links through the chosen SMTP provider. Port 465 uses
+`SMTP_SECURE=true`; STARTTLS ports such as 587 use `false`. Outside production,
+an unconfigured transport still logs and returns the development token. In
+production the token is never returned or logged; only its SHA-256 is stored.
 
 `POST /api/auth/forgot-password` always answers 202 with a byte-identical body
 whether or not the address is registered — a different answer is an
@@ -309,7 +312,7 @@ Emitted today: order placed and order status changed (silent when the customer
 moved their own order — an inbox full of "you did the thing you just did" is
 what teaches people to stop reading it), review moderated, a new answer on your
 question, a watched product back in stock, and a password change. Muting is
-enforced *before* the insert, so a muted category produces no rows at all. The
+enforced _before_ the insert, so a muted category produces no rows at all. The
 account-security category has no mute switch by design: an alert about takeover
 would be silenced first by whoever took the account over.
 
@@ -317,7 +320,7 @@ would be silenced first by whoever took the account over.
 
 Public questions with answers, where an answer written by staff is flagged
 `isOfficial` from the author's role at write time — snapshotted, so a later role
-change does not rewrite history. `answer_count` counts *visible* answers, so
+change does not rewrite history. `answer_count` counts _visible_ answers, so
 moderating one away honestly returns a question to "unanswered". Helpful votes
 are one per customer per answer and never on your own.
 
@@ -356,7 +359,7 @@ query — no id comes from the client, so there is no ownership check to forget.
 `POST /api/products/:id/stock-alert` watches a sold-out product. The sweep hangs
 off `StockMovementsService.record` — the one place every stock change in the
 system already passes through — so no future code path that moves stock can
-forget to fire it. It triggers on the *crossing* into stock, not on the level,
+forget to fire it. It triggers on the _crossing_ into stock, not on the level,
 so restocking something that never ran out mails nobody. A fired subscription is
 deleted rather than flagged, which is what lets the same customer subscribe
 again next time.
@@ -378,7 +381,7 @@ begins the day the feature shipped; no history was fabricated.
 chars of `[A-Za-z0-9._:-]`). Claiming a key is an INSERT against a unique index,
 never a read-then-write, so a double-tapped "place order" cannot create two
 orders even when both requests are in flight. Retrying with the same key and
-body replays the stored response; reusing it with a *different* body is a 409,
+body replays the stored response; reusing it with a _different_ body is a 409,
 because replaying would silently discard the second order. A failed attempt
 releases the key so the customer can fix their cart and retry. Omitting the
 header runs exactly as before, so clients can adopt it one at a time.
@@ -403,13 +406,13 @@ Replaying a retired token is the signature of a stolen credential being used alo
 
 `@RateLimit()` marks the credential and coupon-guessing endpoints; everything else, including the catalogue reads that make up most traffic, passes straight through. Blocked callers get 429 with `Retry-After` and `X-RateLimit-*` headers.
 
-| Route | Budget |
-| --- | --- |
-| `POST /api/auth/register` | 20 per hour |
-| `POST /api/auth/login` | 10 per 15 minutes |
-| `POST /api/auth/refresh` | 30 per 15 minutes |
-| `PATCH /api/auth/password` | 5 per 15 minutes |
-| `POST /api/coupons/preview` | 20 per minute |
+| Route                       | Budget            |
+| --------------------------- | ----------------- |
+| `POST /api/auth/register`   | 20 per hour       |
+| `POST /api/auth/login`      | 10 per 15 minutes |
+| `POST /api/auth/refresh`    | 30 per 15 minutes |
+| `PATCH /api/auth/password`  | 5 per 15 minutes  |
+| `POST /api/coupons/preview` | 20 per minute     |
 
 Authenticated callers are charged per account, anonymous ones per IP (first `X-Forwarded-For` hop). Counters are **per process**: behind several API replicas each enforces its own share. That is adequate for the brute-force and spam rails it protects, but it is not a distributed quota — moving to one means swapping the store for Redis, not rewriting the rules.
 
@@ -443,8 +446,9 @@ docker compose up --build
 Open `http://localhost:8082`. The API health check remains available at
 `http://localhost:3000/api/health` and Swagger at `http://localhost:3000/api/docs`.
 The backend container waits for MySQL, runs compiled TypeORM migrations, seeds
-the development catalogue and admin account, then starts the API. The local
-admin credentials are `admin@mini-ecommerce.local` / `Admin123!`.
+the development catalogue, optionally seeds an explicitly configured admin,
+then starts the API. No admin is created unless `ADMIN_EMAIL` and
+`ADMIN_PASSWORD` are both provided.
 
 Stop the stack with `docker compose down`. Add `-v` to also remove the local
 MySQL data volume.
@@ -465,6 +469,15 @@ DB_SSL=false
 JWT_ACCESS_SECRET=<long random secret>
 JWT_REFRESH_SECRET=<different long random secret>
 FRONTEND_URL=https://<your-vercel-project>.vercel.app
+SMTP_HOST=<your-smtp-host>
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=<your-smtp-user>
+SMTP_PASSWORD=<your-smtp-password-or-app-password>
+SMTP_FROM=MiniShop <no-reply@your-domain.example>
+ADMIN_EMAIL=<private-admin-email>
+ADMIN_PASSWORD=<strong-one-time-seed-password>
+ADMIN_NAME=Store Owner
 ```
 
 `PORT` is supplied by Railway; do not hard-code it. Deploy from a terminal with Railway CLI after linking the project:
@@ -476,7 +489,10 @@ cd server
 railway up
 ```
 
-The container command runs migrations before starting the Nest process. Set `FRONTEND_URL` after the Vercel URL is known, then redeploy the backend.
+The container command runs migrations before starting the Nest process. Set
+`FRONTEND_URL` after the Vercel URL is known, then redeploy the backend. Once
+the first admin has been created, remove `ADMIN_PASSWORD`; subsequent starts
+will skip admin creation while the existing account remains unchanged.
 
 ### Vercel frontend
 
@@ -521,33 +537,33 @@ On macOS/Linux: `DB_NAME_TEST=mini_ecommerce_test npm run test:e2e`.
 
 Migrations run in timestamp order and build the whole schema; `synchronize` is off everywhere.
 
-| Migration | Adds |
-| --- | --- |
-| `InitialSchema` | Baseline schema |
-| `AddUserAuthentication` | `users` |
-| `AddCategoriesAndProducts` | `categories`, `products` |
-| `AddCart` | `carts`, `cart_items` |
-| `AddOrders` | `orders`, `order_items` |
-| `AddOrderShippingDetails` | Order number and shipping columns on `orders`, plus a `(status, created_at)` index |
-| `AddProductReviews` | `reviews` |
-| `AddUserActiveFlag` | `users.is_active` |
-| `AddOrderStatusHistory` | `order_status_history` |
-| `AddRefreshSessions` | `refresh_sessions` |
-| `AddAddressesAndWishlist` | `addresses`, `wishlist_items` |
-| `AddCouponsAndOrderMoney` | `coupons`, `coupon_redemptions`, money-breakdown and payment columns on `orders` |
-| `AddStockMovements` | `stock_movements` |
-| `AddCatalogHierarchyAndSku` | `products.sku`, `products.is_active`, `categories.parent_id` |
-| `AddReviewModeration` | `reviews.is_hidden`, `reviews.helpful_count`, `review_votes` |
-| `AddProductMediaAndTags` | `product_images`, `product_tags`, `product_tag_links` |
-| `AddProductQuestions` | `product_questions`, `product_answers`, `answer_votes` |
-| `AddNotifications` | `notifications`, `notification_preferences` |
-| `AddAuthTokens` | `auth_tokens`, `users.email_verified_at` |
-| `AddReturnRequests` | `return_requests`, `return_request_items`, `return_status_history` |
-| `AddAuditLog` | `audit_log` |
-| `AddIdempotencyKeys` | `idempotency_keys` |
-| `AddReturnStockMovementReason` | `RETURN` appended to the `stock_movements.reason` enum |
-| `AddStockAlerts` | `stock_alerts` |
-| `AddPublicCoupons` | `coupons.is_public` |
+| Migration                      | Adds                                                                               |
+| ------------------------------ | ---------------------------------------------------------------------------------- |
+| `InitialSchema`                | Baseline schema                                                                    |
+| `AddUserAuthentication`        | `users`                                                                            |
+| `AddCategoriesAndProducts`     | `categories`, `products`                                                           |
+| `AddCart`                      | `carts`, `cart_items`                                                              |
+| `AddOrders`                    | `orders`, `order_items`                                                            |
+| `AddOrderShippingDetails`      | Order number and shipping columns on `orders`, plus a `(status, created_at)` index |
+| `AddProductReviews`            | `reviews`                                                                          |
+| `AddUserActiveFlag`            | `users.is_active`                                                                  |
+| `AddOrderStatusHistory`        | `order_status_history`                                                             |
+| `AddRefreshSessions`           | `refresh_sessions`                                                                 |
+| `AddAddressesAndWishlist`      | `addresses`, `wishlist_items`                                                      |
+| `AddCouponsAndOrderMoney`      | `coupons`, `coupon_redemptions`, money-breakdown and payment columns on `orders`   |
+| `AddStockMovements`            | `stock_movements`                                                                  |
+| `AddCatalogHierarchyAndSku`    | `products.sku`, `products.is_active`, `categories.parent_id`                       |
+| `AddReviewModeration`          | `reviews.is_hidden`, `reviews.helpful_count`, `review_votes`                       |
+| `AddProductMediaAndTags`       | `product_images`, `product_tags`, `product_tag_links`                              |
+| `AddProductQuestions`          | `product_questions`, `product_answers`, `answer_votes`                             |
+| `AddNotifications`             | `notifications`, `notification_preferences`                                        |
+| `AddAuthTokens`                | `auth_tokens`, `users.email_verified_at`                                           |
+| `AddReturnRequests`            | `return_requests`, `return_request_items`, `return_status_history`                 |
+| `AddAuditLog`                  | `audit_log`                                                                        |
+| `AddIdempotencyKeys`           | `idempotency_keys`                                                                 |
+| `AddReturnStockMovementReason` | `RETURN` appended to the `stock_movements.reason` enum                             |
+| `AddStockAlerts`               | `stock_alerts`                                                                     |
+| `AddPublicCoupons`             | `coupons.is_public`                                                                |
 
 `AddOrderShippingDetails` backfills existing rows before switching the new columns to `NOT NULL`: order numbers become `ORD-LEGACY-…`, the recipient name is copied from the ordering user, and the remaining address fields are set to `unknown`.
 
