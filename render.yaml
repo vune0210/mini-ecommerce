@@ -4,7 +4,7 @@ services:
     runtime: docker
     rootDir: server
     dockerfilePath: ./Dockerfile
-    dockerCommand: npm run migration:run:prod && npm run seed:catalog:prod && npm run seed:admin:prod && node dist/main.js
+    dockerCommand: sh -c 'npm run migration:run:prod && npm run seed:catalog:prod && npm run seed:admin:prod && node dist/main.js'
     plan: free
     healthCheckPath: /api/health/live
     envVars:
